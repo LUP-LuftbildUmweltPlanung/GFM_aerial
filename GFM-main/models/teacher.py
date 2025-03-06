@@ -108,6 +108,7 @@ class SimMIM(nn.Module):
 
         self.in_chans = self.encoder.in_chans
         self.patch_size = self.encoder.patch_size
+        self.img_size = self.teacher.img_size #new
 
         self.decoder = nn.Sequential(
             nn.Conv2d(
@@ -136,37 +137,7 @@ class SimMIM(nn.Module):
 
         loss += -(self.cos(zs, zt.detach()).mean())*self.teacher.alpha
         return loss"""
-    """
-    def forward(self, x, mask):
-        ################## NEW: x für encoder und loss_recon mit RGBI, x für teacher mit RGB ######################
 
-        # 🟢 Encoder bekommt die volle 4-Kanal Eingabe (RGBI)
-        r, _ = self.encoder(x, mask)
-
-        # ⚠️ Nur die ersten 3 Kanäle (RGB) in den Encoder geben, um zs_rgb zu berechnen
-        x_rgb = x[:, :3]  # 🟢 Nur RGB extrahieren
-        r_rgb, zs_rgb = self.encoder(x_rgb, mask)  # ⚠️ Encoder nochmal nur mit RGB durchlaufen lassen!
-        zs_rgb = self.projector(zs_rgb)  # Feature-Projektion für Distillation Loss
-
-        # 🟢 Teacher bekommt ebenfalls nur RGB
-        zt = self.teacher(F.interpolate(x_rgb, (224, 224), mode='bilinear', align_corners=True))
-
-        # 🟢 Rekonstruktion (RGBI)
-        x_rec = self.decoder(r)  # Rekonstruktion mit 4-Kanälen (RGBI)
-
-        # 🟢 Masken für alle Kanäle anwenden
-        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
-            1).contiguous()
-
-        # 🟢 L1-Loss für 4-Kanal-Rekonstruktion (RGBI)
-        loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans  # in_chans = 4
-
-        # 🟢 Distillation Loss nur mit RGB-basiertem Embedding zs_rgb
-        loss += -(self.cos(zs_rgb, zt.detach()).mean()) * self.teacher.alpha
-
-        return loss
-    """
     def forward(self, x, mask):
         ################## NEW: x für encoder mit RGBI, x für teacher mit RGB ######################
 
@@ -176,7 +147,7 @@ class SimMIM(nn.Module):
 
         # 🟢 Teacher bekommt nur RGB
         x_rgb = x[:, :3]  # 🔥 Extrahiere nur die ersten 3 Kanäle (RGB)
-        z_t = self.teacher(F.interpolate(x_rgb, (224, 224), mode='bilinear', align_corners=True))
+        z_t = self.teacher(F.interpolate(x_rgb, (self.img_size, self.img_size), mode='bilinear', align_corners=True))
 
         # 🟢 Berechne `z_s` direkt aus dem Encoder, aber nur mit RGB-Informationen
         #zs_rgb = self.linear_proj_rgb(zs_full[:, :, :3])  # 🔥 Anpassung von RGBI auf RGB-Space
@@ -255,7 +226,7 @@ def build_simmim(config, logger):
         encoder_stride = 16
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
-    teacher = SwinTeacher(
+    """teacher = SwinTeacher(
         img_size=224,
         patch_size=config.MODEL.SWIN.PATCH_SIZE,
         in_chans=config.MODEL.SWIN.IN_CHANS,
@@ -273,6 +244,27 @@ def build_simmim(config, logger):
         patch_norm=config.MODEL.SWIN.PATCH_NORM,
         use_checkpoint=config.TRAIN.USE_CHECKPOINT,
         alpha=config.ALPHA)
+    """
+    #teacher = GFMTeacher(
+    teacher = SwinTeacher(
+        img_size=config.DATA.IMG_SIZE,
+        patch_size=config.MODEL.SWIN.PATCH_SIZE,
+        in_chans=config.MODEL.SWIN.IN_CHANS,
+        num_classes=0,  # no classification head
+        embed_dim=config.MODEL.SWIN.EMBED_DIM,
+        depths=config.MODEL.SWIN.DEPTHS,
+        num_heads=config.MODEL.SWIN.NUM_HEADS,
+        window_size=config.MODEL.SWIN.WINDOW_SIZE,
+        mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+        qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+        qk_scale=config.MODEL.SWIN.QK_SCALE,
+        drop_rate=config.MODEL.DROP_RATE,
+        drop_path_rate=config.MODEL.DROP_PATH_RATE,
+        ape=config.MODEL.SWIN.APE,
+        patch_norm=config.MODEL.SWIN.PATCH_NORM,
+        use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+        alpha=config.ALPHA
+    )
     load_pretrained(config, teacher, logger)
     model = SimMIM(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
 
@@ -301,6 +293,26 @@ class SwinTeacher(SwinTransformer):
     def forward(self, x):
         x = self.forward_features(x)
         return x
+
+
+"""class GFMTeacher(SwinTransformer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Entferne den Klassifikationskopf (weil der Teacher nur Features ausgeben soll)
+        self.head = None
+
+        # Setze das Modell auf eval-Modus (wir wollen es nicht weitertrainieren)
+        self.eval()
+
+        # Verhindere das Training des Teachers (alle Parameter einfrieren)
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        return self.forward_features(x)
+"""
+
 
 def load_pretrained(config, model, logger):
     logger.info(f">>>>>>>>>> Fine-tuned from {config.PRETRAINED} ..........")
