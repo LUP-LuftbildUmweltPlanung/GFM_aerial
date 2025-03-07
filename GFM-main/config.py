@@ -24,6 +24,7 @@ _C.DATA.DATA_PATH = ''
 _C.DATA.DATASET = 'imagenet'
 # Input image size
 _C.DATA.IMG_SIZE = 192 #224
+_C.DATA.TEACHER_IMG_SIZE = 192 #New
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.
@@ -63,6 +64,7 @@ _C.MODEL.SWIN.EMBED_DIM = 96
 _C.MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
 _C.MODEL.SWIN.WINDOW_SIZE = 7
+_C.MODEL.SWIN.TEACHER_WINDOW_SIZE = 6
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None

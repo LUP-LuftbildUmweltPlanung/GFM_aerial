@@ -120,7 +120,7 @@ class SimMIM(nn.Module):
         )
 
         #New: projects RGBI-embedding to RGB
-        self.linear_proj_rgb = nn.Linear(self.encoder.num_features, self.encoder.num_features)
+        #self.linear_proj_rgb = nn.Linear(self.encoder.num_features, self.encoder.num_features)
 
         self.projector = nn.Linear(self.encoder.num_features, self.encoder.num_features)
         self.cos = nn.CosineSimilarity(dim=1)
@@ -138,7 +138,7 @@ class SimMIM(nn.Module):
         z_t = self.teacher(F.interpolate(x_rgb, (self.img_size, self.img_size), mode='bilinear', align_corners=True))
 
         # learned linear projection from RGBI-projector to RGB-projector to compare with teacher embedding
-        zs_rgb = self.linear_proj_rgb(zs_full)
+        #zs_rgb = self.linear_proj_rgb(zs_full)
 
         # reconstructed RGBI image
         x_rec = self.decoder(r)
@@ -152,7 +152,8 @@ class SimMIM(nn.Module):
 
         # Full loss is sum of reconstruction loss and distillation loss
         loss += -(
-            self.cos(zs_rgb, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
+            #self.cos(zs_rgb, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
+            self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
 
         return loss
 
@@ -233,14 +234,14 @@ def build_simmim(config, logger):
     """
     #teacher = GFMTeacher(
     teacher = SwinTeacher(
-        img_size=config.DATA.IMG_SIZE,
+        img_size=config.DATA.TEACHER_IMG_SIZE, #config.DATA.IMG_SIZE,
         patch_size=config.MODEL.SWIN.PATCH_SIZE,
         in_chans=config.MODEL.SWIN.IN_CHANS,
         num_classes= 0, #config.MODEL.NUM_CLASSES, #0,  # no classification head
         embed_dim=config.MODEL.SWIN.EMBED_DIM,
         depths=config.MODEL.SWIN.DEPTHS,
         num_heads=config.MODEL.SWIN.NUM_HEADS,
-        window_size=config.MODEL.SWIN.WINDOW_SIZE, #7
+        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE, #config.MODEL.SWIN.WINDOW_SIZE, #7
         mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
         qkv_bias=config.MODEL.SWIN.QKV_BIAS,
         qk_scale=config.MODEL.SWIN.QK_SCALE,
