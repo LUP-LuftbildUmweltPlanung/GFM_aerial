@@ -37,10 +37,10 @@ def build_pretrain_optimizer(config, model, logger):
         optimizer = optim.AdamW(parameters, eps=config.TRAIN.OPTIMIZER.EPS, betas=config.TRAIN.OPTIMIZER.BETAS,
                                 lr=config.TRAIN.BASE_LR, weight_decay=config.TRAIN.WEIGHT_DECAY)
 
-    for param_group in optimizer.param_groups:
-        for param in param_group['params']:
-            if param is model.linear_proj_rgb.weight:
-                print("✅ linear_proj_rgb wurde dem Optimizer hinzugefügt!")
+    #for param_group in optimizer.param_groups:
+    #    for param in param_group['params']:
+    #        if param is model.linear_proj_rgb.weight:
+    #            print("✅ linear_proj_rgb wurde dem Optimizer hinzugefügt!")
 
     logger.info(optimizer)
     return optimizer
@@ -65,7 +65,7 @@ def get_pretrain_param_groups(model, logger, skip_list=(), skip_keywords=()):
 
     # New:
     # Add linear projection for RGB to optimizer
-    if hasattr(model, "linear_proj_rgb"):
+    """if hasattr(model, "linear_proj_rgb"):
         logger.info("Adding linear_proj_rgb to optimizer parameters")
         for name, param in model.linear_proj_rgb.named_parameters():
             if not param.requires_grad:
@@ -76,13 +76,13 @@ def get_pretrain_param_groups(model, logger, skip_list=(), skip_keywords=()):
             else:
                 has_decay.append(param)
                 has_decay_name.append(f"linear_proj_rgb.{name}")
-
+    """
     logger.info(f'No decay params: {no_decay_name}')
     logger.info(f'Has decay params: {has_decay_name}')
 
-    for name, param in model.linear_proj_rgb.named_parameters():
+    """for name, param in model.linear_proj_rgb.named_parameters():
         print(f"{name}: {param.grad}")
-
+    """
     return [{'params': has_decay},
             {'params': no_decay, 'weight_decay': 0.}]
 
