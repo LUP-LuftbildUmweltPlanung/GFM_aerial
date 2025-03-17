@@ -59,21 +59,21 @@ class SimMIMTransform:
     def __init__(self, config):
         if 'bigearthnet' in config.DATA.DATA_PATH:
             self.transform_img = bend.build_transform(config, split='train')
-        else:
-            """self.transform_img = T.Compose([
-                T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+        elif config.DATA.DATA_PATH.endswith(".lmdb"):
+            self.transform_img = T.Compose([
+                T.Lambda(lambda img: self.ensure_four_channels(img)),
+                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
+                T.RandomHorizontalFlip(),
+                T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
+                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
+                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+            ])
+        elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
+            self.transform_img = T.Compose([
+                T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
                 T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                 T.RandomHorizontalFlip(),
                 T.ToTensor(),
-                T.Normalize(mean=torch.tensor(IMAGENET_DEFAULT_MEAN),std=torch.tensor(IMAGENET_DEFAULT_STD)),
-            ])"""
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: self.ensure_four_channels(img)),
-                #T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                #T.ToTensor(),
-                T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
                 T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
             ])
  
