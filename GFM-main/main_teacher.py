@@ -129,7 +129,13 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     start = time.time()
     end = time.time()
     #for idx, (img, mask, _) in enumerate(data_loader):
-    for idx, (img, mask) in enumerate(data_loader):
+    #for idx, (img, mask) in enumerate(data_loader):
+    for idx, batch in enumerate(data_loader):
+        if config.DATA.DATA_PATH.endswith(".lmdb"):
+            img, mask = batch  # Falls LMDB nur 2 Werte liefert
+        else:
+            img, mask, _ = batch  # Falls GeoPileV0 ein drittes Element zurückgibt
+
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
