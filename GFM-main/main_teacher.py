@@ -66,7 +66,10 @@ def parse_option():
 
 
 def main(config):
-    data_loader_train = build_loader(config, logger, is_pretrain=True)
+    data_loader_train = build_loader(config, logger, is_pretrain=True, is_train=True)
+    data_loader_vali_temp_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=0)
+    data_loader_vali_spa_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=1)
+    data_loader_vali_temp_spa_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=2)
 
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
     model = build_simmim(config, logger)
@@ -105,12 +108,21 @@ def main(config):
 
     logger.info("Start training")
     start_time = time.time()
+    best_val_loss = float('inf')
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
         train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler)
-        if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
-            save_checkpoint(config, epoch, model_without_ddp, 0., optimizer, lr_scheduler, logger)
+        val_loss_temp_ind = validate_one_epoch(config, model, data_loader_vali_temp_ind, epoch)
+        val_loss_spa_ind = validate_one_epoch(config, model, data_loader_vali_spa_ind, epoch)
+        val_loss_temp_spa_ind = validate_one_epoch(config, model, data_loader_vali_temp_spa_ind, epoch)
+        val_loss = [(val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3, val_loss_temp_ind, val_loss_spa_ind, val_loss_temp_spa_ind]
+
+        if dist.get_rank() == 0 and val_loss[0] < best_val_loss:
+            best_val_loss = val_loss[0]
+            save_checkpoint(config, epoch, model_without_ddp, best_val_loss, optimizer, lr_scheduler, logger, val_loss)
+        #if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
+        #    save_checkpoint(config, epoch, model_without_ddp, 0., optimizer, lr_scheduler, logger)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -131,7 +143,12 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     #for idx, (img, mask, _) in enumerate(data_loader):
     #for idx, (img, mask) in enumerate(data_loader):
     for idx, batch in enumerate(data_loader):
-        if config.DATA.DATA_PATH.endswith(".lmdb"):
+        #print(batch[0])
+        #print(f"type batch: {type(batch)}")
+        #print(type(data_loader.dataset))
+        #exit()
+        #break
+        if config.DATA.DATA_TRAIN_PATH.endswith(".lmdb"):
             img, mask = batch  # Falls LMDB nur 2 Werte liefert
         else:
             img, mask, _ = batch  # Falls GeoPileV0 ein drittes Element zurückgibt
@@ -198,6 +215,53 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                 f'mem {memory_used:.0f}MB')
     epoch_time = time.time() - start
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+
+
+@torch.no_grad()
+def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True):
+
+
+    model.eval()
+
+    batch_time = AverageMeter()
+    loss_meter = AverageMeter()
+
+    start = time.time()
+    end = time.time()
+    num_steps = len(data_loader)
+
+    for idx, batch in enumerate(data_loader):
+        if lmdb_key:
+            img, mask = batch
+        else:
+            img, mask, _ = batch
+
+        img = img.cuda(non_blocking=True)
+        mask = mask.cuda(non_blocking=True)
+
+        loss = model(img, mask)
+
+        torch.cuda.synchronize()
+
+        loss_meter.update(loss.item(), img.size(0))
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if idx % config.PRINT_FREQ == 0:
+            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            etas = batch_time.avg * (num_steps - idx)
+            logger.info(
+                f'Val:   [{epoch}/{config.TRAIN.EPOCHS}][{idx}/{num_steps}]\t'
+                f'eta {datetime.timedelta(seconds=int(etas))}\t'
+                f'time {batch_time.val:.4f} ({batch_time.avg:.4f})\t'
+                f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
+                f'mem {memory_used:.0f}MB')
+
+    epoch_time = time.time() - start
+    logger.info(f"EPOCH {epoch} validation takes {datetime.timedelta(seconds=int(epoch_time))}")
+    logger.info(f"Validation Loss: {loss_meter.avg:.4f}")
+
+    return loss_meter.avg
 
 
 if __name__ == '__main__':

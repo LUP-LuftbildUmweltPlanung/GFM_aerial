@@ -19,11 +19,15 @@ _C.DATA = CN()
 # Batch size for a single GPU, could be overwritten by command line argument
 _C.DATA.BATCH_SIZE = 128
 # Path to dataset, could be overwritten by command line argument
-_C.DATA.DATA_PATH = ''
+#_C.DATA.DATA_PATH = ''
+_C.DATA.DATA_TRAIN_PATH = ''
+_C.DATA.DATA_VALI_PATH_TEMP_IND = ''
+_C.DATA.DATA_VALI_PATH_SPA_IND = ''
+_C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
 # Input image size
-_C.DATA.IMG_SIZE = 192 #224
+_C.DATA.IMG_SIZE = 384 #192 #224
 _C.DATA.TEACHER_IMG_SIZE = 192 #New
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
@@ -230,8 +234,8 @@ def update_config(config, args):
     # merge from specific arguments
     if _check_args('batch_size'):
         config.DATA.BATCH_SIZE = args.batch_size
-    if _check_args('data_path'):
-        config.DATA.DATA_PATH = args.data_path
+    #if _check_args('data_path'):
+    #    config.DATA.DATA_PATH = args.data_path
     if _check_args('resume'):
         config.MODEL.RESUME = args.resume
     if _check_args('pretrained'):
@@ -256,6 +260,10 @@ def update_config(config, args):
         config.NO_VAL = True
     if _check_args('alpha'):
         config.ALPHA = args.alpha
+
+    config.DATA.DATA_VALI_PATH = [config.DATA.DATA_VALI_PATH_TEMP_IND,
+                                  config.DATA.DATA_VALI_PATH_SPA_IND,
+                                  config.DATA.DATA_VALI_PATH_TEMP_SPA_IND ]
 
     # set local rank for distributed training
     config.LOCAL_RANK = args.local_rank

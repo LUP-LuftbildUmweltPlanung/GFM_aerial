@@ -43,13 +43,14 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
     return max_accuracy
 
 
-def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger):
+def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger, val_loss=0):
     save_state = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'lr_scheduler': lr_scheduler.state_dict(),
                   'max_accuracy': max_accuracy,
                   'epoch': epoch,
-                  'config': config}
+                  'config': config,
+                  'val_loss': val_loss}
     if config.AMP_OPT_LEVEL != "O0":
         save_state['amp'] = amp.state_dict()
 

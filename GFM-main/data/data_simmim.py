@@ -56,10 +56,12 @@ class MaskGenerator:
 
 
 class SimMIMTransform:
-    def __init__(self, config):
-        if 'bigearthnet' in config.DATA.DATA_PATH:
+    def __init__(self, config, is_train=True, vali_key=None):
+        data_path = config.DATA.DATA_TRAIN_PATH if is_train else config.DATA.DATA_VALI_PATH[vali_key]
+
+        if 'bigearthnet' in data_path:
             self.transform_img = bend.build_transform(config, split='train')
-        elif config.DATA.DATA_PATH.endswith(".lmdb"):
+        elif data_path.endswith(".lmdb"):
             self.transform_img = T.Compose([
                 T.Lambda(lambda img: self.ensure_four_channels(img)),
                 T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
@@ -68,7 +70,7 @@ class SimMIMTransform:
                 T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
                             std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
             ])
-        elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
+        elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
             self.transform_img = T.Compose([
                 T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
                 T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
@@ -90,6 +92,43 @@ class SimMIMTransform:
             model_patch_size=model_patch_size,
             mask_ratio=config.DATA.MASK_RATIO,
         )
+
+    """def __init__(self, config):
+        if 'bigearthnet' in config.DATA.DATA_PATH:
+            self.transform_img = bend.build_transform(config, split='train')
+        elif config.DATA.DATA_PATH.endswith(".lmdb"):
+            self.transform_img = T.Compose([
+                T.Lambda(lambda img: self.ensure_four_channels(img)),
+                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
+                T.RandomHorizontalFlip(),
+                T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
+                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
+                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+            ])
+        elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
+            self.transform_img = T.Compose([
+                T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
+                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
+                T.RandomHorizontalFlip(),
+                T.ToTensor(),
+                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
+                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+            ])
+
+        if config.MODEL.TYPE == 'swin':
+            model_patch_size = config.MODEL.SWIN.PATCH_SIZE
+        elif config.MODEL.TYPE == 'vit':
+            model_patch_size = config.MODEL.VIT.PATCH_SIZE
+        else:
+            raise NotImplementedError
+
+        self.mask_generator = MaskGenerator(
+            input_size=config.DATA.IMG_SIZE,
+            mask_patch_size=config.DATA.MASK_PATCH_SIZE,
+            model_patch_size=model_patch_size,
+            mask_ratio=config.DATA.MASK_RATIO,
+        )
+    """
 
     def ensure_four_channels(self, img):
         """
@@ -172,7 +211,52 @@ class LMDBSafetensorDataset(Dataset):
 
         return tensor
 
+def build_loader_simmim(config, logger, is_train=True, vali_key=None):
+    # 1. Wähle richtigen Datenpfad
+    data_path = config.DATA.DATA_TRAIN_PATH if is_train else config.DATA.DATA_VALI_PATH[vali_key]
+    logger.info(f"{'Train' if is_train else 'Validation'} data path: {data_path}")
 
+    # 2. Transformation aufbauen
+    transform = SimMIMTransform(config, is_train, vali_key)
+    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
+
+    # 3. Dataset laden
+    if data_path.endswith(".lmdb"):
+        logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
+        dataset = LMDBSafetensorDataset(data_path, transform)
+    elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
+        datasets = []
+        for ds in os.listdir(data_path):
+            datasets.append(ImageFolder(os.path.join(data_path, ds), transform))
+        dataset = torch.utils.data.ConcatDataset(datasets)
+    else:
+        dataset = ImageFolder(data_path, transform)
+
+    logger.info(f'Build dataset: {"train" if is_train else "val"} images = {len(dataset)}')
+
+    # 4. Sampler konfigurieren (Train = shuffle, Val = keine Zufälligkeit)
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=dist.get_world_size(),
+        rank=dist.get_rank(),
+        shuffle=is_train
+    )
+
+    # 5. Dataloader erstellen
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.DATA.BATCH_SIZE,
+        sampler=sampler,
+        num_workers=config.DATA.NUM_WORKERS,
+        pin_memory=True,
+        drop_last=is_train,  # nur beim Training wichtig
+        collate_fn=collate_fn
+    )
+
+    return dataloader
+
+
+"""
 def build_loader_simmim(config, logger):
     transform = SimMIMTransform(config)
     logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
@@ -197,7 +281,7 @@ def build_loader_simmim(config, logger):
     print(len(dataloader.dataset))
     # exit()
     return dataloader
-
+"""
 
 
 """def build_loader_simmim(config, logger):
