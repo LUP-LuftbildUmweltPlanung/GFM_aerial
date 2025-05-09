@@ -59,7 +59,7 @@ def write_to_lmdb(db, key, safetensor_data):
             db.set_mapsize(new_limit)  # Speichergröße erhöhen
 
 
-def read_from_lmdb(db, key):
+def read_from_lmdb(lmdb_path, key):
     """
     Liest ein Safetensor aus der LMDB-Datenbank aus.
 
@@ -67,9 +67,10 @@ def read_from_lmdb(db, key):
     :param key: Schlüssel des gespeicherten Safetensors
     :return: Dictionary mit geladenen Bändern als NumPy-Arrays
     """
+    db = lmdb.open(lmdb_path, readonly=True)
     with db.begin() as txn:
         safetensor_data = txn.get(key.encode())
-    #env.close()
+    db.close()
 
     if safetensor_data is None:
         print(f"❌ Kein Eintrag für '{key}' in LMDB gefunden!")
@@ -133,51 +134,6 @@ def read_all_from_lmdb(db):
     db.close()
     return all_data
 
-
-"""def read_specific_key_from_lmdb(db, key):
-    
-    #Liest einen spezifischen Key aus der LMDB-Datenbank.
-    #:param db: LMDB-Umgebung
-    #:param key: Schlüssel (String)
-    
-    with db.begin() as txn:
-        value = txn.get(key.encode())
-        print(f"🔍 Gelesener Wert für '{key}':", value.decode() if value else "❌ Nicht gefunden")
-
-def list_all_entries(db):
-    
-    #Listet alle Key-Value-Paare in der LMDB-Datenbank auf.
-    #:param db: LMDB-Umgebung
-    
-    with db.begin() as txn:
-        cursor = txn.cursor()
-        print("\n📂 **Alle Einträge in LMDB:**")
-        for key, value in cursor:
-            print(f"🔹 {key.decode()} -> {value.decode()}")
-
-def write_to_lmdb(db, key, value):
-    
-    #Write (key, value) to LMDB, automatically increasing the map size if needed.
-    #:param db: LMDB environment
-    #:param key: Key (should be string, gets converted to bytes)
-    #:param value: Value (must be bytes)
-    
-    success = False
-    while not success:
-        txn = db.begin(write=True)
-        try:
-            txn.put(key.encode(), value.encode())  # Key explizit in Bytes umwandeln
-            txn.commit()
-            success = True
-        except lmdb.MapFullError:
-            txn.abort()
-            curr_limit = db.info()['map_size']
-            new_limit = curr_limit * 2
-            print(f">>> Doubling LMDB map size to {new_limit >> 20}MB ...")
-            db.set_mapsize(new_limit)  # Speichergröße verdoppeln
-"""
-
-
 def process_tiff_folder(folder_path, lmdb_path):
     """
     Liest alle TIFF-Dateien aus einem Ordner und speichert sie als Safetensors in einer LMDB-Datei.
@@ -206,24 +162,81 @@ def process_tiff_folder(folder_path, lmdb_path):
     for tif_name, bands in all_images.items():
         print(f"🖼️ {tif_name}: {list(bands.keys())}")
 
-# -------------------------------
-# Beispielhafte Nutzung
-# -------------------------------
+
+def get_tif_metadata(tif_path):
+    """
+    Liest Metadaten aus einer bestehenden TIFF-Datei.
+
+    :param tif_path: Pfad zur TIFF-Datei
+    :return: Metadaten-Dictionary von Rasterio
+    """
+    with rasterio.open(tif_path) as src:
+        meta = src.meta.copy()  # Metadaten speichern
+    return meta
+
+def save_tif_with_lmdb_bands(output_path, bands_dict, metadata):
+    """
+    Speichert ein neues TIFF mit den Bändern aus LMDB und den Metadaten der Originaldatei.
+
+    :param output_path: Speicherpfad der neuen TIFF-Datei
+    :param bands_dict: Dictionary {Bandname: NumPy-Array} mit den Bilddaten
+    :param metadata: Metadaten-Dictionary von Rasterio
+    """
+    # Bänder alphabetisch oder nach gewünschter Reihenfolge sortieren
+    sorted_bands = sorted(bands_dict.keys())  # Oder: EXPECTED_BANDS = ["1", "2", "3", "4"]
+
+    # Erstelle einen 3D-Array-Stack (C, H, W → für TIFF-Format)
+    stacked_array = np.stack([bands_dict[b] for b in sorted_bands])
+
+    # TIFF-Metadaten anpassen
+    metadata.update({
+        "count": len(sorted_bands),  # Anzahl der Bänder
+        "dtype": stacked_array.dtype  # Sicherstellen, dass der Datentyp korrekt ist
+    })
+
+    # Speichern des neuen TIFF
+    with rasterio.open(output_path, "w", **metadata) as dst:
+        for i, band in enumerate(stacked_array, start=1):  # Bänder indexieren ab 1
+            dst.write(band, i)
+
+    print(f"✅ Datei gespeichert: {output_path}")
+
+
+
+def process_lmdb_and_tiffs(lmdb_path, tif_folder, output_folder):
+    """
+    Geht durch alle TIFF-Dateien, lädt die Bänder aus LMDB und speichert sie als neue TIFFs.
+
+    :param lmdb_path: Pfad zur LMDB-Datei
+    :param tif_folder: Ordner mit den Original-TIFF-Dateien
+    :param output_folder: Ordner zum Speichern der neuen TIFF-Dateien
+    """
+    os.makedirs(output_folder, exist_ok=True)
+
+    for tif_file in os.listdir(tif_folder):
+        if tif_file.endswith(".tif"):
+            key = tif_file.replace(".tif", "")  # Key für LMDB
+            tif_path = os.path.join(tif_folder, tif_file)
+            output_path = os.path.join(output_folder, tif_file)
+
+            # Bänder aus LMDB laden
+            bands_dict = read_from_lmdb(lmdb_path, key)
+            if bands_dict is None:
+                continue  # Überspringe, falls LMDB keinen Eintrag hat
+
+            # Metadaten aus TIFF laden
+            metadata = get_tif_metadata(tif_path)
+
+            # Neues TIFF mit LMDB-Bändern speichern
+            save_tif_with_lmdb_bands(output_path, bands_dict, metadata)
+
+
 folder_path = "/home/embedding/Data_Center/Vera/GeoPile/GeoPileV0/folder1/folder2"  # Ändere den Pfad zum Ordner mit TIFF-Dateien
-lmdb_path = "/home/embedding/Data_Center/Vera/GeoPile/GeoPileV0/sample_lmdb.lmdb"  # Name der LMDB-Datei
+lmdb_path = "/home/embedding/Data_Center/Vera/GeoPile/GeoPileV0_Proesa_rgbi/sample_lmdb.lmdb"  # Name der LMDB-Datei
 
-process_tiff_folder(folder_path, lmdb_path)
+output_folder = "/home/embedding/Data_Center/Vera/GeoPile/GeoPileV0_Proesa_rgbi/output_sample"
 
+process_lmdb_and_tiffs(lmdb_path, folder_path, output_folder)
 
+#process_tiff_folder(folder_path, lmdb_path)
 
-"""lmdb_path = "/home/embedding/Data_Center/Vera/GFM_aerial/test_lmdb3.lmdb"
-tif_path = "/home/embedding/Data_Center/Vera/GeoPile/GeoPileV0/folder1/folder2/Proesa_DBUNE_2020_29.tif"
-key, band_dict = read_tif_bands(tif_path)
-band_dict_safetensor = save_bands_to_safetensor(band_dict)
-new_lmdb = create_or_open_lmdb(lmdb_path)
-write_to_lmdb(new_lmdb, key, band_dict_safetensor)
-#img_safetensor = read_from_lmdb(new_lmdb, key)
-img_safetensors = read_all_from_lmdb(new_lmdb)
-print(img_safetensors.items().items())
-for band, array in img_safetensors.items().items():
-    print(f"{band}: {array.shape}")"""

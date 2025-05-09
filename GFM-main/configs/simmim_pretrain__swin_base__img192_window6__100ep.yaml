@@ -6,13 +6,17 @@ MODEL:
     EMBED_DIM: 128
     DEPTHS: [ 2, 2, 18, 2 ]
     NUM_HEADS: [ 4, 8, 16, 32 ]
-    WINDOW_SIZE: 8 #6
+    WINDOW_SIZE: 6 #6
     TEACHER_WINDOW_SIZE: 6
 DATA:
-  IMG_SIZE: 768
+  IMG_SIZE: 384 #768
   TEACHER_IMG_SIZE: 192
   MASK_PATCH_SIZE: 32
   MASK_RATIO: 0.6
+  DATA_TRAIN_PATH: "../../GeoPile/GeoPileV0_Proesa_rgbi/test_tiles.lmdb"
+  DATA_VALI_PATH_TEMP_IND: "../../GeoPile/GeoPileV0_Proesa_rgbi/test_temp_ind_sample2.lmdb"
+  DATA_VALI_PATH_SPA_IND: "../../GeoPile/GeoPileV0_Proesa_rgbi/test_temp_ind_sample2_2.lmdb"
+  DATA_VALI_PATH_TEMP_SPA_IND: "../../GeoPile/GeoPileV0_Proesa_rgbi/test_temp_ind_sample2_3.lmdb"
 TRAIN:
   EPOCHS: 10
   WARMUP_EPOCHS: 1
