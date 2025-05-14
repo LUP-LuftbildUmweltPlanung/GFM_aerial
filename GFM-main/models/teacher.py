@@ -150,12 +150,15 @@ class SimMIM(nn.Module):
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
 
+        reconstruction_loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        distillation_loss = -(self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
+
         # Full loss is sum of reconstruction loss and distillation loss
         loss += -(
             #self.cos(zs_rgb, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
             self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
 
-        return loss
+        return loss, reconstruction_loss, distillation_loss
 
     @torch.jit.ignore
     def no_weight_decay(self):

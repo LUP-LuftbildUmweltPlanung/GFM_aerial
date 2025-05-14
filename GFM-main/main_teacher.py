@@ -8,11 +8,17 @@ import time
 import argparse
 import datetime
 import numpy as np
+import socket
 
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 from timm.utils import AverageMeter
+
+import mlflow
+import mlflow.pytorch
+from mlflow.tracking import MlflowClient
+from mlflow_config import *
 
 from config import get_config
 # from models import build_model
@@ -28,6 +34,46 @@ try:
     from apex import amp
 except ImportError:
     amp = None
+
+
+
+# Optimize PyTorch precision
+torch.set_float32_matmul_precision('medium')
+
+# Set MLflow request timeout
+os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "3500"
+print(f" MLflow Tracking URI Set: {mlflow.get_tracking_uri()}")
+
+# Initialize MLflow Client
+client = MlflowClient()
+
+# Define Experiment Name
+experiment_name = "GFMaerial_test_half_train"
+
+# Check if the Experiment Exists
+experiment = client.get_experiment_by_name(experiment_name)
+
+# Restore if it was soft-deleted
+if experiment and experiment.lifecycle_stage == "deleted":
+    print(f" Experiment '{experiment_name}' is soft-deleted. Restoring...")
+    client.restore_experiment(experiment.experiment_id)
+    experiment = client.get_experiment_by_name(experiment_name)
+
+# Create new if not found
+if experiment is None:
+    print(f" Experiment '{experiment_name}' not found! Creating a new one...")
+    experiment_id = client.create_experiment(name=experiment_name)
+    print(f" Created new experiment: {experiment_name} (ID: {experiment_id})")
+else:
+    experiment_id = experiment.experiment_id
+    print(f" Using existing experiment: {experiment_name} (ID: {experiment_id})")
+
+# Set the active experiment
+mlflow.set_experiment(experiment_name)
+
+# Confirm Artifact Location
+experiment = client.get_experiment(experiment_id)
+print(f" Experiment '{experiment_name}' Artifact Location: {experiment.artifact_location}")
 
 
 def parse_option():
@@ -109,27 +155,66 @@ def main(config):
     logger.info("Start training")
     start_time = time.time()
     best_val_loss = float('inf')
+    loss_log_table = []
+    val_temp_ind_table = []
+    val_spa_ind_table = []
+    val_temp_spa_ind_table = []
+    train_log_table = []
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler)
-        val_loss_temp_ind = validate_one_epoch(config, model, data_loader_vali_temp_ind, epoch)
-        val_loss_spa_ind = validate_one_epoch(config, model, data_loader_vali_spa_ind, epoch)
-        val_loss_temp_spa_ind = validate_one_epoch(config, model, data_loader_vali_temp_spa_ind, epoch)
-        val_loss = [(val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3, val_loss_temp_ind, val_loss_spa_ind, val_loss_temp_spa_ind]
+        train_loss = train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler, train_log_table)
+        val_loss_temp_ind = validate_one_epoch(config, model, data_loader_vali_temp_ind, epoch, val_temp_ind_table)
+        val_loss_spa_ind = validate_one_epoch(config, model, data_loader_vali_spa_ind, epoch, val_spa_ind_table)
+        val_loss_temp_spa_ind = validate_one_epoch(config, model, data_loader_vali_temp_spa_ind, epoch, val_temp_spa_ind_table)
+        avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3
 
-        if dist.get_rank() == 0 and val_loss[0] < best_val_loss:
-            best_val_loss = val_loss[0]
-            save_checkpoint(config, epoch, model_without_ddp, best_val_loss, optimizer, lr_scheduler, logger, val_loss)
+        if dist.get_rank() == 0 and avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            save_checkpoint(config, epoch, model_without_ddp, best_val_loss, optimizer, lr_scheduler, logger)
+
+        if dist.get_rank() == 0:
+            # Mlflow
+            mlflow.log_metric("val_loss_avg", avg_val_loss, step=epoch) # Average of all three validation losses
+            mlflow.log_metric("val_loss_temp", val_loss_temp_ind, step=epoch) # Validation loss on temporally independent samples
+            mlflow.log_metric("val_loss_spa", val_loss_spa_ind, step=epoch) # Validation loss on spatially independent samples
+            mlflow.log_metric("val_loss_temp_spa", val_loss_temp_spa_ind, step=epoch) # Validation loss on spatially AND temporally independent samples
+            mlflow.log_metric("train_loss", train_loss, step=epoch) # Train loss
+
+            loss_log_table.append({
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "val_loss_avg": avg_val_loss,
+                "val_loss_temp": val_loss_temp_ind,
+                "val_loss_spa": val_loss_spa_ind,
+                "val_loss_temp_spa": val_loss_temp_spa_ind
+            })
+
         #if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
         #    save_checkpoint(config, epoch, model_without_ddp, 0., optimizer, lr_scheduler, logger)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    if dist.get_rank() == 0:
+        import pandas as pd
+        loss_log_df = pd.DataFrame(loss_log_table)
+        mlflow.log_table(loss_log_df, artifact_file="losses_per_epoch.json")
+
+        val_temp_ind_log_df = pd.DataFrame(val_temp_ind_table)
+        mlflow.log_table(val_temp_ind_log_df, artifact_file="val_temp_ind_log.json")
+        val_spa_ind_log_df = pd.DataFrame(val_spa_ind_table)
+        mlflow.log_table(val_spa_ind_log_df, artifact_file="val_spa_ind_log.json")
+        val_temp_spa_ind_log_df = pd.DataFrame(val_temp_spa_ind_table)
+        mlflow.log_table(val_temp_spa_ind_log_df, artifact_file="val_temp_spa_ind_log.json")
+
+
+        train_log_df = pd.DataFrame(train_log_table)
+        mlflow.log_table(train_log_df, artifact_file="train_log.json")
+
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
+def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, train_log_table):
     model.train()
     optimizer.zero_grad()
 
@@ -137,9 +222,13 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     norm_meter = AverageMeter()
+    recon_loss_meter = AverageMeter()
+    dist_loss_meter = AverageMeter()
 
     start = time.time()
     end = time.time()
+
+    curr_dict = {}
     #for idx, (img, mask, _) in enumerate(data_loader):
     #for idx, (img, mask) in enumerate(data_loader):
     for idx, batch in enumerate(data_loader):
@@ -156,10 +245,14 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        loss = model(img, mask)
+        loss, reconstruction_loss, distillation_loss = model(img, mask)
+
+        #logger.info(f"losses: {loss}, {reconstruction_loss}, {distillation_loss}")
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
+            reconstruction_loss = reconstruction_loss / config.TRAIN.ACCUMULATION_STEPS
+            distillation_loss = distillation_loss / config.TRAIN.ACCUMULATION_STEPS
             if config.AMP_OPT_LEVEL != "O0":
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -198,6 +291,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
         torch.cuda.synchronize()
 
         loss_meter.update(loss.item(), img.size(0))
+        recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
+        dist_loss_meter.update(distillation_loss.item(), img.size(0))
         norm_meter.update(grad_norm)
         batch_time.update(time.time() - end)
         end = time.time()
@@ -213,22 +308,51 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
+
+            curr_dict = {
+                "epoch": epoch,
+                "loss_avg": loss_meter.avg,
+                "loss_value": loss_meter.val,
+                "reconstruction_loss_avg": recon_loss_meter.avg,
+                "reconstruction_loss_val": recon_loss_meter.val,
+                "distillation_loss_avg": dist_loss_meter.avg,
+                "distillation_loss_val": dist_loss_meter.val,
+                "batch_time_avg": batch_time.avg,
+                "batch_time_val": batch_time.val,
+                "memory_used": memory_used,
+                "eta": datetime.timedelta(seconds=int(etas)),
+                "grad_norm_avg": float(norm_meter.avg),
+                "grad_norm_val": float(norm_meter.val)
+            }
+
+            #logger.info(type(norm_meter.avg),  type(norm_meter.val))
+
     epoch_time = time.time() - start
+
+    curr_dict["epoch_time"] = epoch_time
+    train_log_table.append(curr_dict)
+
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
+
+    return loss_meter.avg
 
 
 @torch.no_grad()
-def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True):
+def validate_one_epoch(config, model, data_loader, epoch, val_log_table, lmdb_key=True):
 
 
     model.eval()
 
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
+    recon_loss_meter = AverageMeter()
+    dist_loss_meter = AverageMeter()
 
     start = time.time()
     end = time.time()
     num_steps = len(data_loader)
+
+    curr_dict = {}
 
     for idx, batch in enumerate(data_loader):
         if lmdb_key:
@@ -239,11 +363,13 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True):
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        loss = model(img, mask)
+        loss, reconstruction_loss, distillation_loss  = model(img, mask)
 
         torch.cuda.synchronize()
 
         loss_meter.update(loss.item(), img.size(0))
+        recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
+        dist_loss_meter.update(distillation_loss.item(), img.size(0))
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -257,7 +383,26 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True):
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
 
+            curr_dict = {
+                "epoch": epoch,
+                "loss_avg": loss_meter.avg,
+                "loss_value": loss_meter.val,
+                "reconstruction_loss_avg": recon_loss_meter.avg,
+                "reconstruction_loss_val": recon_loss_meter.val,
+                "distillation_loss_avg": dist_loss_meter.avg,
+                "distillation_loss_val": dist_loss_meter.val,
+                "batch_time_avg": batch_time.avg,
+                "batch_time_val": batch_time.val,
+                "memory_used": memory_used,
+                "eta": datetime.timedelta(seconds=int(etas))
+            }
+
     epoch_time = time.time() - start
+
+    curr_dict["epoch_time"] = epoch_time
+    val_log_table.append(curr_dict)
+
+
     logger.info(f"EPOCH {epoch} validation takes {datetime.timedelta(seconds=int(epoch_time))}")
     logger.info(f"Validation Loss: {loss_meter.avg:.4f}")
 
@@ -313,6 +458,32 @@ if __name__ == '__main__':
         logger.info(f"Full config saved to {path}")
 
     # print config
-    logger.info(config.dump())
+    #logger.info(config.dump())
 
-    main(config)
+    #logger.info("Train dataset: ", config.DATA.DATA_TRAIN_PATH)
+
+
+    # -------------------- MLflow Run Start --------------------
+    if dist.get_rank() == 0:
+        with mlflow.start_run(run_name=config.MODEL.NAME):
+            # Add tags for traceability
+            mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
+            mlflow.set_tag("mlflow.source.name", os.path.abspath(__file__))  # Will show as "Source"
+            #mlflow.set_tag("mlflow.dataset", config.DATA.DATA_TRAIN_PATH)
+            mlflow.log_params({
+                "model": config.MODEL.NAME,
+                "dataset": config.DATA.DATA_TRAIN_PATH,
+                "epochs": config.TRAIN.EPOCHS,
+                "batch_size": config.DATA.BATCH_SIZE,
+                "accum_steps": config.TRAIN.ACCUMULATION_STEPS,
+                "alpha": config.ALPHA,
+                "base_lr": config.TRAIN.BASE_LR
+            })
+
+            mlflow.log_artifact(path)
+
+            # Call training inside the same run
+            main(config)
+    else:
+        main(config)
+
