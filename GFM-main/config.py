@@ -271,6 +271,9 @@ def update_config(config, args):
     # output folder
     config.OUTPUT = os.path.join(config.OUTPUT, config.MODEL.NAME, config.TAG)
 
+    # output stats folder
+    config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats2")
+
     config.freeze()
 
 
