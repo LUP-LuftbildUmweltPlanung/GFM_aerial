@@ -13,13 +13,14 @@ DATA:
   TEACHER_IMG_SIZE: 192
   MASK_PATCH_SIZE: 32
   MASK_RATIO: 0.6
-  DATA_TRAIN_PATH: "/home/embedding/Data_Center/Vera/full_train.lmdb"
+  #DATA_TRAIN_PATH: "/home/embedding/Data_Center/Vera/full_train.lmdb"
+  DATA_TRAIN_PATH: "/home/embedding/Data_Center/DataHouse/Gfm_aerial/datasets_boxes/new_temp_ind/vali_temp_ind_HH_with_test_swap.lmdb"
   DATA_VALI_PATH_TEMP_IND: "/home/embedding/Data_Center/DataHouse/Gfm_aerial/datasets_boxes/new_temp_ind/test_temp_ind_noHH_with_vali_samples.lmdb"
   DATA_VALI_PATH_SPA_IND: "/home/embedding/Data_Center/DataHouse/Gfm_aerial/datasets_boxes/vali/vali_spati_temp_ind_hist.lmdb"
   DATA_VALI_PATH_TEMP_SPA_IND: "/home/embedding/Data_Center/DataHouse/Gfm_aerial/datasets_boxes/new_temp_ind/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
 TRAIN:
-  EPOCHS: 3
-  WARMUP_EPOCHS: 1
+  EPOCHS: 10
+  WARMUP_EPOCHS: 5
   BASE_LR: 2e-4
   WARMUP_LR: 1e-6
   MIN_LR: 1e-5
