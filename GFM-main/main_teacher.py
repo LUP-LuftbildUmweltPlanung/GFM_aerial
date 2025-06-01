@@ -41,7 +41,7 @@ except ImportError:
 # Optimize PyTorch precision
 torch.set_float32_matmul_precision('medium')
 
-# Set MLflow request timeout
+"""# Set MLflow request timeout
 os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "3500"
 print(f" MLflow Tracking URI Set: {mlflow.get_tracking_uri()}")
 
@@ -75,7 +75,7 @@ mlflow.set_experiment(experiment_name)
 # Confirm Artifact Location
 experiment = client.get_experiment(experiment_id)
 print(f" Experiment '{experiment_name}' Artifact Location: {experiment.artifact_location}")
-
+"""
 
 def parse_option():
     parser = argparse.ArgumentParser('SimMIM pre-training script', add_help=False)
@@ -553,7 +553,7 @@ if __name__ == '__main__':
 
     # -------------------- MLflow Run Start --------------------
     if dist.get_rank() == 0:
-        try:
+        """try:
             with mlflow.start_run(run_name=config.MODEL.NAME):
                 # Add tags for traceability
                 mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
@@ -574,7 +574,7 @@ if __name__ == '__main__':
                 # Call training inside the same run
                 main(config)
         except:
-            print("mlflow not available")
+            print("mlflow not available")"""
         main(config)
     else:
         main(config)
