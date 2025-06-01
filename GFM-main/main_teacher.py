@@ -179,13 +179,22 @@ def main(config):
 
 
         if dist.get_rank() == 0:
-            # Mlflow
-            mlflow.log_metric("val_loss_avg", avg_val_loss, step=epoch) # Average of all three validation losses
-            mlflow.log_metric("val_loss_temp", val_loss_temp_ind, step=epoch) # Validation loss on temporally independent samples
-            mlflow.log_metric("val_loss_spa", val_loss_spa_ind, step=epoch) # Validation loss on spatially independent samples
-            mlflow.log_metric("val_loss_temp_spa", val_loss_temp_spa_ind, step=epoch) # Validation loss on spatially AND temporally independent samples
-            mlflow.log_metric("train_loss", train_loss, step=epoch) # Train loss
 
+            write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "loss_log_table.csv"),
+                               [epoch, train_loss, avg_val_loss, val_loss_temp_ind, val_loss_spa_ind,
+                                val_loss_temp_spa_ind],
+                               ["epoch", "train_loss", "val_loss_avg", "val_loss_temp", "val_loss_spa",
+                                "val_loss_temp_spa"])
+
+            # Mlflow
+            try:
+                mlflow.log_metric("val_loss_avg", avg_val_loss, step=epoch) # Average of all three validation losses
+                mlflow.log_metric("val_loss_temp", val_loss_temp_ind, step=epoch) # Validation loss on temporally independent samples
+                mlflow.log_metric("val_loss_spa", val_loss_spa_ind, step=epoch) # Validation loss on spatially independent samples
+                mlflow.log_metric("val_loss_temp_spa", val_loss_temp_spa_ind, step=epoch) # Validation loss on spatially AND temporally independent samples
+                mlflow.log_metric("train_loss", train_loss, step=epoch) # Train loss
+            except:
+                print(f"mlflow not available for epoch {epoch}")
             """loss_log_table.append({
                 "epoch": epoch,
                 "train_loss": train_loss,
@@ -195,10 +204,6 @@ def main(config):
                 "val_loss_temp_spa": val_loss_temp_spa_ind
             })"""
 
-            write_epoch_to_csv(os.path.join(config.OUTPUT_STATS,"loss_log_table.csv"),
-                               [epoch, train_loss, avg_val_loss, val_loss_temp_ind, val_loss_spa_ind, val_loss_temp_spa_ind],
-                               ["epoch", "train_loss","val_loss_avg","val_loss_temp","val_loss_spa","val_loss_temp_spa"])
-
         #if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
         #    save_checkpoint(config, epoch, model_without_ddp, 0., optimizer, lr_scheduler, logger)
 
@@ -206,18 +211,25 @@ def main(config):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     if dist.get_rank() == 0:
         loss_log_df = pd.DataFrame(loss_log_table)
-        mlflow.log_table(loss_log_df, artifact_file="losses_per_epoch.json")
 
         val_temp_ind_log_df = pd.DataFrame(val_temp_ind_table)
-        mlflow.log_table(val_temp_ind_log_df, artifact_file="val_temp_ind_log.json")
-        val_spa_ind_log_df = pd.DataFrame(val_spa_ind_table)
-        mlflow.log_table(val_spa_ind_log_df, artifact_file="val_spa_ind_log.json")
-        val_temp_spa_ind_log_df = pd.DataFrame(val_temp_spa_ind_table)
-        mlflow.log_table(val_temp_spa_ind_log_df, artifact_file="val_temp_spa_ind_log.json")
 
+        val_spa_ind_log_df = pd.DataFrame(val_spa_ind_table)
+
+        val_temp_spa_ind_log_df = pd.DataFrame(val_temp_spa_ind_table)
 
         train_log_df = pd.DataFrame(train_log_table)
-        mlflow.log_table(train_log_df, artifact_file="train_log.json")
+
+
+        try:
+            mlflow.log_table(loss_log_df, artifact_file="losses_per_epoch.json")
+            mlflow.log_table(val_temp_ind_log_df, artifact_file="val_temp_ind_log.json")
+            mlflow.log_table(val_spa_ind_log_df, artifact_file="val_spa_ind_log.json")
+            mlflow.log_table(val_temp_spa_ind_log_df, artifact_file="val_temp_spa_ind_log.json")
+            mlflow.log_table(train_log_df, artifact_file="train_log.json")
+        except:
+            print(f"mlflow not available")
+
 
     logger.info('Training time {}'.format(total_time_str))
 
@@ -330,7 +342,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
                          memory_used,
                          datetime.timedelta(seconds=int(etas)),
                          float(norm_meter.avg),
-                         float(norm_meter.val)]
+                         float(norm_meter.val),
+                         lr]
 
             curr_dict = {
                 "epoch": epoch,
@@ -345,7 +358,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
                 "memory_used": memory_used,
                 "eta": datetime.timedelta(seconds=int(etas)),
                 "grad_norm_avg": float(norm_meter.avg),
-                "grad_norm_val": float(norm_meter.val)
+                "grad_norm_val": float(norm_meter.val),
+                "learning_rate": lr
             }
 
 
@@ -373,7 +387,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
                             "eta",
                             "grad_norm_avg",
                             "grad_norm_val",
-                            "epoch_time"]
+                            "epoch_time",
+                            "learning_rate"]
     write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "train_log_table.csv"), curr_list, train_header)
 
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
@@ -538,25 +553,29 @@ if __name__ == '__main__':
 
     # -------------------- MLflow Run Start --------------------
     if dist.get_rank() == 0:
-        with mlflow.start_run(run_name=config.MODEL.NAME):
-            # Add tags for traceability
-            mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
-            mlflow.set_tag("mlflow.source.name", os.path.abspath(__file__))  # Will show as "Source"
-            #mlflow.set_tag("mlflow.dataset", config.DATA.DATA_TRAIN_PATH)
-            mlflow.log_params({
-                "model": config.MODEL.NAME,
-                "dataset": config.DATA.DATA_TRAIN_PATH,
-                "epochs": config.TRAIN.EPOCHS,
-                "batch_size": config.DATA.BATCH_SIZE,
-                "accum_steps": config.TRAIN.ACCUMULATION_STEPS,
-                "alpha": config.ALPHA,
-                "base_lr": config.TRAIN.BASE_LR
-            })
+        try:
+            with mlflow.start_run(run_name=config.MODEL.NAME):
+                # Add tags for traceability
+                mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
+                mlflow.set_tag("mlflow.source.name", os.path.abspath(__file__))  # Will show as "Source"
+                #mlflow.set_tag("mlflow.dataset", config.DATA.DATA_TRAIN_PATH)
+                mlflow.log_params({
+                    "model": config.MODEL.NAME,
+                    "dataset": config.DATA.DATA_TRAIN_PATH,
+                    "epochs": config.TRAIN.EPOCHS,
+                    "batch_size": config.DATA.BATCH_SIZE,
+                    "accum_steps": config.TRAIN.ACCUMULATION_STEPS,
+                    "alpha": config.ALPHA,
+                    "base_lr": config.TRAIN.BASE_LR
+                })
 
-            mlflow.log_artifact(path)
+                mlflow.log_artifact(path)
 
-            # Call training inside the same run
-            main(config)
+                # Call training inside the same run
+                main(config)
+        except:
+            print("mlflow not available")
+        main(config)
     else:
         main(config)
 

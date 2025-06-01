@@ -68,9 +68,9 @@ class SimMIMTransform:
                     T.Lambda(lambda img: self.ensure_four_channels(img)),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
-                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
-                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
+                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
             elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
@@ -78,7 +78,7 @@ class SimMIMTransform:
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
                     T.ToTensor(),
-                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
         else:
             data_path = config.DATA.DATA_VALI_PATH[vali_key]
@@ -86,9 +86,9 @@ class SimMIMTransform:
             if data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
                     T.Lambda(lambda img: self.ensure_four_channels(img)),
-                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
-                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
+                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
+                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
  
         if config.MODEL.TYPE == 'swin':
@@ -225,7 +225,10 @@ class LMDBSafetensorDataset(Dataset):
 
 def build_loader_simmim(config, logger, is_train=True, vali_key=None):
     # 1. Wähle richtigen Datenpfad
-    data_path = config.DATA.DATA_TRAIN_PATH
+    if is_train:
+        data_path = config.DATA.DATA_TRAIN_PATH
+    else:
+        data_path = config.DATA.DATA_VALI_PATH[vali_key]
     logger.info(f"Train data path: {data_path}")
 
     # 2. Transformation aufbauen
