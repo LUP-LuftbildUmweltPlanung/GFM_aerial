@@ -187,18 +187,16 @@ class LMDBSafetensorDataset(Dataset):
         return tensor
 
 def build_loader_simmim(config, logger, is_train=True, vali_key=None):
-    # 1. Wähle richtigen Datenpfad
     if is_train:
         data_path = config.DATA.DATA_TRAIN_PATH
+        logger.info(f"Train data path: {data_path}")
     else:
         data_path = config.DATA.DATA_VALI_PATH[vali_key]
-    logger.info(f"Train data path: {data_path}")
+        logger.info(f"Vali data path: {data_path}")
 
-    # 2. Transformation aufbauen
     transform = SimMIMTransform(config, is_train, vali_key)
     logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
 
-    # 3. Dataset laden
     if data_path.endswith(".lmdb"):
         logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
         dataset = LMDBSafetensorDataset(data_path, transform)
@@ -210,9 +208,9 @@ def build_loader_simmim(config, logger, is_train=True, vali_key=None):
     else:
         dataset = ImageFolder(data_path, transform)
 
-    logger.info(f'Build dataset: train images = {len(dataset)}')
+    logger.info(f'Build dataset: images = {len(dataset)}')
 
-    # 4. Sampler konfigurieren (Train = shuffle, Val = keine Zufälligkeit)
+    # Sampler: Train = shuffle, Val = no shuffle
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -220,113 +218,17 @@ def build_loader_simmim(config, logger, is_train=True, vali_key=None):
         shuffle=is_train
     )
 
-    # 5. Dataloader erstellen
     dataloader = DataLoader(
         dataset,
         batch_size=config.DATA.BATCH_SIZE,
         sampler=sampler,
         num_workers=config.DATA.NUM_WORKERS,
         pin_memory=True,
-        drop_last=is_train,  # nur beim Training wichtig
+        drop_last=is_train,  # just for training
         collate_fn=collate_fn
     )
 
     return dataloader
-
-def build_loader_vali(config, logger, vali_key=None):
-    # 1. Wähle richtigen Datenpfad
-    data_path = config.DATA.DATA_TRAIN_PATH if is_train else config.DATA.DATA_VALI_PATH[vali_key]
-    logger.info(f"{'Train' if is_train else 'Validation'} data path: {data_path}")
-
-    # 2. Transformation aufbauen
-    transform = SimMIMTransform(config, is_train, vali_key)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    # 3. Dataset laden
-    if data_path.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
-        dataset = LMDBSafetensorDataset(data_path, transform)
-    elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
-        datasets = []
-        for ds in os.listdir(data_path):
-            datasets.append(ImageFolder(os.path.join(data_path, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(data_path, transform)
-
-    logger.info(f'Build dataset: {"train" if is_train else "val"} images = {len(dataset)}')
-
-    # 4. Sampler konfigurieren (Train = shuffle, Val = keine Zufälligkeit)
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=dist.get_world_size(),
-        rank=dist.get_rank(),
-        shuffle=is_train
-    )
-
-    # 5. Dataloader erstellen
-    dataloader = DataLoader(
-        dataset,
-        batch_size=config.DATA.BATCH_SIZE,
-        sampler=sampler,
-        num_workers=config.DATA.NUM_WORKERS,
-        pin_memory=True,
-        drop_last=is_train,  # nur beim Training wichtig
-        collate_fn=collate_fn
-    )
-
-    return dataloader
-
-
-"""
-def build_loader_simmim(config, logger):
-    transform = SimMIMTransform(config)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    if config.DATA.DATA_PATH.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {config.DATA.DATA_PATH}")
-        dataset = LMDBSafetensorDataset(config.DATA.DATA_PATH, transform)
-    elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
-        datasets = []
-        for ds in os.listdir(config.DATA.DATA_PATH):
-            datasets.append(ImageFolder(os.path.join(config.DATA.DATA_PATH, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(config.DATA.DATA_PATH, transform)
-
-    logger.info(f'Build dataset: train images = {len(dataset)}')
-
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=True)
-    dataloader = DataLoader(dataset, config.DATA.BATCH_SIZE, sampler=sampler, num_workers=config.DATA.NUM_WORKERS,
-                            pin_memory=True, drop_last=True, collate_fn=collate_fn)
-    print(sampler)
-    print(len(dataloader.dataset))
-    # exit()
-    return dataloader
-"""
-
-
-"""def build_loader_simmim(config, logger):
-    transform = SimMIMTransform(config)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    if 'GeoPileV0' in config.DATA.DATA_PATH:
-        datasets = []
-        for ds in os.listdir(config.DATA.DATA_PATH):
-            datasets.append(ImageFolder(os.path.join(config.DATA.DATA_PATH, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(config.DATA.DATA_PATH, transform)
-
-    logger.info(f'Build dataset: train images = {len(dataset)}')
-    
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=True)
-    dataloader = DataLoader(dataset, config.DATA.BATCH_SIZE, sampler=sampler, num_workers=config.DATA.NUM_WORKERS, 
-                                pin_memory=True, drop_last=True, collate_fn=collate_fn)
-    print(sampler)
-    print(len(dataloader.dataset))
-    #exit()
-    return dataloader"""
 
 class my_sampler(DistributedSampler):
     def __init__(self, dataset, num_replicas = None, batch_size=64,

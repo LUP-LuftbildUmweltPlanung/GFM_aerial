@@ -62,27 +62,9 @@ def get_pretrain_param_groups(model, logger, skip_list=(), skip_keywords=()):
         else:
             has_decay.append(param)
             has_decay_name.append(name)
-
-    # New:
-    # Add linear projection for RGB to optimizer
-    """if hasattr(model, "linear_proj_rgb"):
-        logger.info("Adding linear_proj_rgb to optimizer parameters")
-        for name, param in model.linear_proj_rgb.named_parameters():
-            if not param.requires_grad:
-                continue
-            if len(param.shape) == 1 or name.endswith(".bias"):
-                no_decay.append(param)
-                no_decay_name.append(f"linear_proj_rgb.{name}")
-            else:
-                has_decay.append(param)
-                has_decay_name.append(f"linear_proj_rgb.{name}")
-    """
     logger.info(f'No decay params: {no_decay_name}')
     logger.info(f'Has decay params: {has_decay_name}')
 
-    """for name, param in model.linear_proj_rgb.named_parameters():
-        print(f"{name}: {param.grad}")
-    """
     return [{'params': has_decay},
             {'params': no_decay, 'weight_decay': 0.}]
 

@@ -22,7 +22,7 @@ DATA:
   DATA_VALI_PATH_SPA_IND: "/nne_mount/Vera/Data/Test/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
   DATA_VALI_PATH_TEMP_SPA_IND: "/nne_mount/Vera/Data/Test/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
 TRAIN:
-  EPOCHS: 2 #100
+  EPOCHS: 4 #100
   WARMUP_EPOCHS: 1 #10
   BASE_LR: 2e-4
   WARMUP_LR: 1e-6
@@ -30,4 +30,4 @@ TRAIN:
   WEIGHT_DECAY: 0.05
 PRINT_FREQ: 100
 SAVE_FREQ: 5
-TAG: simmim_pretrain__swin_base__img192_window6__100ep
+TAG: gfm_aerial_gfm_teacher_geopile
