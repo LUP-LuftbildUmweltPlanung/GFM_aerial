@@ -4,3 +4,9 @@
 [submodule "GFM-main/GFM-main/git_reps/apex"]
 	path = GFM-main/GFM-main/git_reps/apex
 	url = https://github.com/NVIDIA/apex.git
+[submodule "GFM-main/git_reps/SimMIM"]
+	path = GFM-main/git_reps/SimMIM
+	url = https://github.com/microsoft/SimMIM.git
+[submodule "GFM-main/git_reps/apex"]
+	path = GFM-main/git_reps/apex
+	url = https://github.com/NVIDIA/apex.git
