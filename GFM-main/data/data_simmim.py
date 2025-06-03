@@ -105,43 +105,6 @@ class SimMIMTransform:
             mask_ratio=config.DATA.MASK_RATIO,
         )
 
-    """def __init__(self, config):
-        if 'bigearthnet' in config.DATA.DATA_PATH:
-            self.transform_img = bend.build_transform(config, split='train')
-        elif config.DATA.DATA_PATH.endswith(".lmdb"):
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: self.ensure_four_channels(img)),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
-                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
-            ])
-        elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.ToTensor(),
-                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
-            ])
-
-        if config.MODEL.TYPE == 'swin':
-            model_patch_size = config.MODEL.SWIN.PATCH_SIZE
-        elif config.MODEL.TYPE == 'vit':
-            model_patch_size = config.MODEL.VIT.PATCH_SIZE
-        else:
-            raise NotImplementedError
-
-        self.mask_generator = MaskGenerator(
-            input_size=config.DATA.IMG_SIZE,
-            mask_patch_size=config.DATA.MASK_PATCH_SIZE,
-            model_patch_size=model_patch_size,
-            mask_ratio=config.DATA.MASK_RATIO,
-        )
-    """
-
     def ensure_four_channels(self, img):
         """
         Stellt sicher, dass der Tensor 4 Kanäle hat. Falls das Bild nur 3 Kanäle hat, wird ein zusätzlicher Alpha-Kanal (0.5) hinzugefügt.
