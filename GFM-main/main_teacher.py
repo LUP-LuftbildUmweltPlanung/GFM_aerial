@@ -41,41 +41,46 @@ except ImportError:
 # Optimize PyTorch precision
 torch.set_float32_matmul_precision('medium')
 
-"""# Set MLflow request timeout
-os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "3500"
-print(f" MLflow Tracking URI Set: {mlflow.get_tracking_uri()}")
+def setup_mlflow():
+    # Set MLflow request timeout
+    os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "3500"
+    print(f" MLflow Tracking URI Set: {mlflow.get_tracking_uri()}")
 
-# Initialize MLflow Client
-client = MlflowClient()
+    # Initialize MLflow Client
+    client = MlflowClient()
 
-# Define Experiment Name
-experiment_name = "GFMaerial_test"
+    # Define Experiment Name
+    experiment_name = "GFMaerial_test"
 
-# Check if the Experiment Exists
-experiment = client.get_experiment_by_name(experiment_name)
-
-# Restore if it was soft-deleted
-if experiment and experiment.lifecycle_stage == "deleted":
-    print(f" Experiment '{experiment_name}' is soft-deleted. Restoring...")
-    client.restore_experiment(experiment.experiment_id)
+    # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
 
-# Create new if not found
-if experiment is None:
-    print(f" Experiment '{experiment_name}' not found! Creating a new one...")
-    experiment_id = client.create_experiment(name=experiment_name)
-    print(f" Created new experiment: {experiment_name} (ID: {experiment_id})")
-else:
-    experiment_id = experiment.experiment_id
-    print(f" Using existing experiment: {experiment_name} (ID: {experiment_id})")
+    # Restore if it was soft-deleted
+    if experiment and experiment.lifecycle_stage == "deleted":
+        print(f" Experiment '{experiment_name}' is soft-deleted. Restoring...")
+        client.restore_experiment(experiment.experiment_id)
+        experiment = client.get_experiment_by_name(experiment_name)
 
-# Set the active experiment
-mlflow.set_experiment(experiment_name)
+    # Create new if not found
+    if experiment is None:
+        print(f" Experiment '{experiment_name}' not found! Creating a new one...")
+        experiment_id = client.create_experiment(name=experiment_name)
+        print(f" Created new experiment: {experiment_name} (ID: {experiment_id})")
+    else:
+        experiment_id = experiment.experiment_id
+        print(f" Using existing experiment: {experiment_name} (ID: {experiment_id})")
 
-# Confirm Artifact Location
-experiment = client.get_experiment(experiment_id)
-print(f" Experiment '{experiment_name}' Artifact Location: {experiment.artifact_location}")
-"""
+    # Set the active experiment
+    mlflow.set_experiment(experiment_name)
+
+    # Confirm Artifact Location
+    experiment = client.get_experiment(experiment_id)
+    print(f" Experiment '{experiment_name}' Artifact Location: {experiment.artifact_location}")
+    return True
+
+def mlflow_logging(log_path):
+    return
+
 
 def parse_option():
     parser = argparse.ArgumentParser('SimMIM pre-training script', add_help=False)
@@ -161,13 +166,44 @@ def main(config):
     val_spa_ind_table = []
     val_temp_spa_ind_table = []
     train_log_table = []
+    train_header = ["epoch",
+                    "loss_avg",
+                    "loss_value",
+                    "reconstruction_loss_avg",
+                    "reconstruction_loss_val",
+                    "distillation_loss_avg",
+                    "distillation_loss_val",
+                    "batch_time_avg",
+                    "batch_time_val",
+                    "memory_used",
+                    #"eta",
+                    "grad_norm_avg",
+                    "grad_norm_val",
+                    "learning_rate",
+                    "epoch_time"
+                    ]
+    vali_header = ["epoch",
+                   "loss_avg",
+                   "loss_value",
+                   "reconstruction_loss_avg",
+                   "reconstruction_loss_val",
+                   "distillation_loss_avg",
+                   "distillation_loss_val",
+                   "batch_time_avg",
+                   "batch_time_val",
+                   "memory_used",
+                   #"eta",
+                   "epoch_time"]
+    loss_log_header = ["epoch", "train_loss", "val_loss_avg", "val_loss_temp", "val_loss_spa",
+                                "val_loss_temp_spa"]
+
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_loss = train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler, train_log_table)
-        val_loss_temp_ind = validate_one_epoch(config, model, data_loader_vali_temp_ind, epoch, val_temp_ind_table, val_key="temp_ind")
-        val_loss_spa_ind = validate_one_epoch(config, model, data_loader_vali_spa_ind, epoch, val_spa_ind_table, val_key="spa_ind")
-        val_loss_temp_spa_ind = validate_one_epoch(config, model, data_loader_vali_temp_spa_ind, epoch, val_temp_spa_ind_table, val_key="temp_spa_ind")
+        train_loss = train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler, train_log_table, train_header)
+        val_loss_temp_ind = validate_one_epoch(config, model, data_loader_vali_temp_ind, epoch, val_temp_ind_table, vali_header, val_key="temp_ind")
+        val_loss_spa_ind = validate_one_epoch(config, model, data_loader_vali_spa_ind, epoch, val_spa_ind_table, vali_header, val_key="spa_ind")
+        val_loss_temp_spa_ind = validate_one_epoch(config, model, data_loader_vali_temp_spa_ind, epoch, val_temp_spa_ind_table, vali_header, val_key="temp_spa_ind")
         avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3
 
         if dist.get_rank() == 0 and (avg_val_loss < best_val_loss or (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1))):
@@ -179,12 +215,10 @@ def main(config):
 
 
         if dist.get_rank() == 0:
-
-            write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "loss_log_table.csv"),
-                               [epoch, train_loss, avg_val_loss, val_loss_temp_ind, val_loss_spa_ind,
-                                val_loss_temp_spa_ind],
-                               ["epoch", "train_loss", "val_loss_avg", "val_loss_temp", "val_loss_spa",
-                                "val_loss_temp_spa"])
+            curr_log_loss = [epoch, train_loss, avg_val_loss, val_loss_temp_ind, val_loss_spa_ind,
+                                val_loss_temp_spa_ind]
+            write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "loss_log_table.csv"), curr_log_loss
+                               , loss_log_header)
 
             # Mlflow
             try:
@@ -194,15 +228,8 @@ def main(config):
                 mlflow.log_metric("val_loss_temp_spa", val_loss_temp_spa_ind, step=epoch) # Validation loss on spatially AND temporally independent samples
                 mlflow.log_metric("train_loss", train_loss, step=epoch) # Train loss
             except:
-                print(f"mlflow not available for epoch {epoch}")
-            """loss_log_table.append({
-                "epoch": epoch,
-                "train_loss": train_loss,
-                "val_loss_avg": avg_val_loss,
-                "val_loss_temp": val_loss_temp_ind,
-                "val_loss_spa": val_loss_spa_ind,
-                "val_loss_temp_spa": val_loss_temp_spa_ind
-            })"""
+                logger.info(f"mlflow not available for epoch {epoch}")
+            loss_log_table.append(curr_log_loss)
 
         #if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
         #    save_checkpoint(config, epoch, model_without_ddp, 0., optimizer, lr_scheduler, logger)
@@ -210,15 +237,15 @@ def main(config):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     if dist.get_rank() == 0:
-        loss_log_df = pd.DataFrame(loss_log_table)
+        loss_log_df = pd.DataFrame(loss_log_table, columns=loss_log_header)
 
-        val_temp_ind_log_df = pd.DataFrame(val_temp_ind_table)
+        val_temp_ind_log_df = pd.DataFrame(val_temp_ind_table, columns=vali_header)
 
-        val_spa_ind_log_df = pd.DataFrame(val_spa_ind_table)
+        val_spa_ind_log_df = pd.DataFrame(val_spa_ind_table, columns=vali_header)
 
-        val_temp_spa_ind_log_df = pd.DataFrame(val_temp_spa_ind_table)
+        val_temp_spa_ind_log_df = pd.DataFrame(val_temp_spa_ind_table, columns=vali_header)
 
-        train_log_df = pd.DataFrame(train_log_table)
+        train_log_df = pd.DataFrame(train_log_table, columns=train_header)
 
 
         try:
@@ -234,7 +261,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, train_log_table):
+def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, train_log_table, train_header):
     model.train()
     optimizer.zero_grad()
 
@@ -248,16 +275,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
     start = time.time()
     end = time.time()
 
-    curr_dict = {}
-    curr_list = []
-    #for idx, (img, mask, _) in enumerate(data_loader):
-    #for idx, (img, mask) in enumerate(data_loader):
     for idx, batch in enumerate(data_loader):
-        #print(batch[0])
-        #print(f"type batch: {type(batch)}")
-        #print(type(data_loader.dataset))
-        #exit()
-        #break
+
         if config.DATA.DATA_TRAIN_PATH.endswith(".lmdb"):
             img, mask = batch  # Falls LMDB nur 2 Werte liefert
         else:
@@ -268,7 +287,7 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
 
         loss, reconstruction_loss, distillation_loss = model(img, mask)
 
-        #logger.info(f"losses: {loss}, {reconstruction_loss}, {distillation_loss}")
+        logger.info(f"losses: {loss}, {reconstruction_loss}, {distillation_loss}")
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
@@ -330,65 +349,30 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
 
-            curr_list = [epoch,
-                         loss_meter.avg,
-                         loss_meter.val,
-                         recon_loss_meter.avg,
-                         recon_loss_meter.val,
-                         dist_loss_meter.avg,
-                         dist_loss_meter.val,
-                         batch_time.avg,
-                         batch_time.val,
-                         memory_used,
-                         datetime.timedelta(seconds=int(etas)),
-                         float(norm_meter.avg),
-                         float(norm_meter.val),
-                         lr]
+            logger.info("learning rate in epoch:")
+            logger.info(lr)
 
-            curr_dict = {
-                "epoch": epoch,
-                "loss_avg": loss_meter.avg,
-                "loss_value": loss_meter.val,
-                "reconstruction_loss_avg": recon_loss_meter.avg,
-                "reconstruction_loss_val": recon_loss_meter.val,
-                "distillation_loss_avg": dist_loss_meter.avg,
-                "distillation_loss_val": dist_loss_meter.val,
-                "batch_time_avg": batch_time.avg,
-                "batch_time_val": batch_time.val,
-                "memory_used": memory_used,
-                "eta": datetime.timedelta(seconds=int(etas)),
-                "grad_norm_avg": float(norm_meter.avg),
-                "grad_norm_val": float(norm_meter.val),
-                "learning_rate": lr
-            }
-
-
-
-
-            #logger.info(type(norm_meter.avg),  type(norm_meter.val))
 
     epoch_time = time.time() - start
 
-    curr_dict["epoch_time"] = epoch_time
-    train_log_table.append(curr_dict)
+    curr_list = [epoch,
+                 loss_meter.avg,
+                 loss_meter.val,
+                 recon_loss_meter.avg,
+                 recon_loss_meter.val,
+                 dist_loss_meter.avg,
+                 dist_loss_meter.val,
+                 batch_time.avg,
+                 batch_time.val,
+                 torch.cuda.max_memory_allocated() / (1024.0 * 1024.0),
+                 float(norm_meter.avg),
+                 float(norm_meter.val),
+                 lr,
+                 epoch_time
+                 ]
 
-    curr_list.append(epoch_time)
+    train_log_table.append(curr_list)
 
-    train_header = ["epoch",
-                            "loss_avg",
-                            "loss_value",
-                            "reconstruction_loss_avg",
-                            "reconstruction_loss_val",
-                            "distillation_loss_avg",
-                            "distillation_loss_val",
-                            "batch_time_avg",
-                            "batch_time_val",
-                            "memory_used",
-                            "eta",
-                            "grad_norm_avg",
-                            "grad_norm_val",
-                            "epoch_time",
-                            "learning_rate"]
     write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "train_log_table.csv"), curr_list, train_header)
 
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
@@ -397,7 +381,7 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, 
 
 
 @torch.no_grad()
-def validate_one_epoch(config, model, data_loader, epoch, val_log_table, lmdb_key=True, val_key="spa_ind"):
+def validate_one_epoch(config, model, data_loader, epoch, val_log_table, vali_header, lmdb_key=True, val_key="spa_ind"):
 
 
     model.eval()
@@ -410,9 +394,6 @@ def validate_one_epoch(config, model, data_loader, epoch, val_log_table, lmdb_ke
     start = time.time()
     end = time.time()
     num_steps = len(data_loader)
-
-    curr_dict = {}
-    curr_list = []
 
     for idx, batch in enumerate(data_loader):
         if lmdb_key:
@@ -443,51 +424,22 @@ def validate_one_epoch(config, model, data_loader, epoch, val_log_table, lmdb_ke
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
 
-            curr_dict = {
-                "epoch": epoch,
-                "loss_avg": loss_meter.avg,
-                "loss_value": loss_meter.val,
-                "reconstruction_loss_avg": recon_loss_meter.avg,
-                "reconstruction_loss_val": recon_loss_meter.val,
-                "distillation_loss_avg": dist_loss_meter.avg,
-                "distillation_loss_val": dist_loss_meter.val,
-                "batch_time_avg": batch_time.avg,
-                "batch_time_val": batch_time.val,
-                "memory_used": memory_used,
-                "eta": etas
-            }
+    epoch_end = time.time() # time.performancecounter
+    epoch_time = epoch_end - start
+    curr_list = [epoch,
+                 loss_meter.avg,
+                 loss_meter.val,
+                 recon_loss_meter.avg,
+                 recon_loss_meter.val,
+                 dist_loss_meter.avg,
+                 dist_loss_meter.val,
+                 batch_time.avg,
+                 batch_time.val,
+                 torch.cuda.max_memory_allocated() / (1024.0 * 1024.0),
+                 epoch_time]
 
-            curr_list = [epoch,
-                         loss_meter.avg,
-                         loss_meter.val,
-                         recon_loss_meter.avg,
-                         recon_loss_meter.val,
-                         dist_loss_meter.avg,
-                         dist_loss_meter.val,
-                         batch_time.avg,
-                         batch_time.val,
-                         memory_used,
-                         etas]
+    val_log_table.append(curr_list)
 
-    epoch_time = time.time() - start
-
-    curr_dict["epoch_time"] = epoch_time
-    val_log_table.append(curr_dict)
-
-    curr_list.append(epoch_time)
-
-    vali_header = ["epoch",
-                    "loss_avg",
-                    "loss_value",
-                    "reconstruction_loss_avg",
-                    "reconstruction_loss_val",
-                    "distillation_loss_avg",
-                    "distillation_loss_val",
-                    "batch_time_avg",
-                    "batch_time_val",
-                    "memory_used",
-                    "eta",
-                    "epoch_time"]
     write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, f"vali_log_table_{val_key}.csv"), curr_list, vali_header)
 
 
@@ -499,6 +451,8 @@ def validate_one_epoch(config, model, data_loader, epoch, val_log_table, lmdb_ke
 
 if __name__ == '__main__':
     _, config = parse_option()
+    mlflow_logging = False
+
 
     if config.AMP_OPT_LEVEL != "O0":
         assert amp is not None, "amp not installed!"
@@ -552,30 +506,40 @@ if __name__ == '__main__':
 
 
     # -------------------- MLflow Run Start --------------------
-    if dist.get_rank() == 0:
-        """try:
-            with mlflow.start_run(run_name=config.MODEL.NAME):
-                # Add tags for traceability
-                mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
-                mlflow.set_tag("mlflow.source.name", os.path.abspath(__file__))  # Will show as "Source"
-                #mlflow.set_tag("mlflow.dataset", config.DATA.DATA_TRAIN_PATH)
-                mlflow.log_params({
-                    "model": config.MODEL.NAME,
-                    "dataset": config.DATA.DATA_TRAIN_PATH,
-                    "epochs": config.TRAIN.EPOCHS,
-                    "batch_size": config.DATA.BATCH_SIZE,
-                    "accum_steps": config.TRAIN.ACCUMULATION_STEPS,
-                    "alpha": config.ALPHA,
-                    "base_lr": config.TRAIN.BASE_LR
-                })
+    #if dist.get_rank() == 0:
 
-                mlflow.log_artifact(path)
-
-                # Call training inside the same run
-                main(config)
+        try:
+            mlflow_logging = setup_mlflow()
+            logger.info(f"mlflow_logging: {mlflow_logging}")
         except:
-            print("mlflow not available")"""
-        main(config)
-    else:
-        main(config)
+            logger.info(f"mlflow not available.")
+
+        if mlflow_logging:
+            try:
+                with mlflow.start_run(run_name=config.MODEL.NAME):
+                    # Add tags for traceability
+                    mlflow.set_tag("mlflow.user", socket.gethostname())  # Will show as "Created by"
+                    mlflow.set_tag("mlflow.source.name", os.path.abspath(__file__))  # Will show as "Source"
+                    #mlflow.set_tag("mlflow.dataset", config.DATA.DATA_TRAIN_PATH)
+                    mlflow.log_params({
+                        "model": config.MODEL.NAME,
+                        "dataset": config.DATA.DATA_TRAIN_PATH,
+                        "epochs": config.TRAIN.EPOCHS,
+                        "batch_size": config.DATA.BATCH_SIZE,
+                        "accum_steps": config.TRAIN.ACCUMULATION_STEPS,
+                        "alpha": config.ALPHA,
+                        "base_lr": config.TRAIN.BASE_LR
+                    })
+
+                    mlflow.log_artifact(path)
+
+                    # Call training inside the same run
+                    logger.info(f"start training")
+                    main(config)
+            except Exception as e:
+                logger.info(f"Interrupted mlflow loop because of: {e}")
+                logger.info("Trying training locally.")
+                main(config)
+        else:
+            main(config)
 
