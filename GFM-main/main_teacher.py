@@ -52,7 +52,7 @@ def setup_mlflow_function():
     client = MlflowClient()
 
     # Define Experiment Name
-    experiment_name = "GFMaerial_test"
+    experiment_name = "GFMaerial_swin_teacher"
 
     # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
