@@ -1,0 +1,2 @@
+epoch,loss_avg,loss_value,reconstruction_loss_avg,reconstruction_loss_val,distillation_loss_avg,distillation_loss_val,batch_time_avg,batch_time_val,memory_used,grad_norm_avg,grad_norm_val,learning_rate,epoch_time
+0,-0.5298631773191508,-0.7080283164978027,0.378058637428411,0.2389165312051773,-0.9079218148320325,-0.9469448328018188,0.2937424858373341,0.32094573974609375,6288.251953125,inf,9.697014808654785,3.262977663144188e-07,23463.99044418335
