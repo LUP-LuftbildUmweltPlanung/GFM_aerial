@@ -171,6 +171,9 @@ def main(config):
     model = build_simmim(config, logger)
     model.cuda()
     logger.info(str(model))
+    logger.info(torch.cuda.is_available())
+    logger.info(torch.backends.cudnn.enabled)
+    logger.info(f"device of model: {next(model.parameters()).device}")
 
     optimizer = build_optimizer(config, model, logger, is_pretrain=True)
     if config.AMP_OPT_LEVEL != "O0":
@@ -253,6 +256,9 @@ def main(config):
 
 
 def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):#, train_log_table, train_header):
+    logger.info(torch.cuda.is_available())
+    logger.info(torch.backends.cudnn.enabled)
+    logger.info(f"device of model: {next(model.parameters()).device}")
     model.train()
     optimizer.zero_grad()
 
@@ -385,8 +391,9 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
 @torch.no_grad()
 def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key="spa_ind"):
-
-
+    logger.info(torch.cuda.is_available())
+    logger.info(torch.backends.cudnn.enabled)
+    logger.info(f"device of model: {next(model.parameters()).device}")
     model.eval()
 
     batch_time = AverageMeter()
@@ -465,7 +472,6 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
 
 if __name__ == '__main__':
     _, config = parse_option()
-    mlflow_logging = False
 
 
     if config.AMP_OPT_LEVEL != "O0":
@@ -481,6 +487,9 @@ if __name__ == '__main__':
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
     torch.cuda.set_device(config.LOCAL_RANK)
+
+    print(f"Process {rank} uses device: {torch.cuda.current_device()} ({torch.cuda.get_device_name(torch.cuda.current_device())})")
+
     torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
     torch.distributed.barrier()
 
