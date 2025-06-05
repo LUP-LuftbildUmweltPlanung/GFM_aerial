@@ -301,12 +301,17 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
         loss, reconstruction_loss, distillation_loss = model(img, mask)
 
+        loss_meter.update(loss.item(), img.size(0))
+        recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
+        dist_loss_meter.update(distillation_loss.item(), img.size(0))
+
         #logger.info(f"losses: {loss}, {reconstruction_loss}, {distillation_loss}")
+        #logger.info(loss_meter.avg)
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
-            reconstruction_loss = reconstruction_loss / config.TRAIN.ACCUMULATION_STEPS
-            distillation_loss = distillation_loss / config.TRAIN.ACCUMULATION_STEPS
+            #reconstruction_loss = reconstruction_loss / config.TRAIN.ACCUMULATION_STEPS
+            #distillation_loss = distillation_loss / config.TRAIN.ACCUMULATION_STEPS
             if config.AMP_OPT_LEVEL != "O0":
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -321,9 +326,11 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                 else:
                     grad_norm = get_grad_norm(model.parameters())
             if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
+                norm_meter.update(grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step_update(epoch * num_steps + idx)
+
         else:
             optimizer.zero_grad()
             if config.AMP_OPT_LEVEL != "O0":
@@ -339,17 +346,17 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.TRAIN.CLIP_GRAD)
                 else:
                     grad_norm = get_grad_norm(model.parameters())
+
+            norm_meter.update(grad_norm)
             optimizer.step()
             lr_scheduler.step_update(epoch * num_steps + idx)
 
         torch.cuda.synchronize()
 
-        loss_meter.update(loss.item(), img.size(0))
-        recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
-        dist_loss_meter.update(distillation_loss.item(), img.size(0))
-        norm_meter.update(grad_norm)
         batch_time.update(time.time() - end)
         end = time.time()
+
+        #logger.info(loss_meter.avg)
 
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
