@@ -265,6 +265,107 @@ class SwinTeacher(SwinTransformer):
         return x
 
 
+
+
+class SimMIM_testing(nn.Module):
+    def __init__(self, encoder, encoder_stride):
+        super().__init__()
+        self.encoder = encoder
+        self.encoder_stride = encoder_stride
+        self.in_chans = self.encoder.in_chans
+        self.patch_size = self.encoder.patch_size
+
+        self.decoder = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.encoder.num_features,
+                out_channels=self.encoder_stride ** 2 * self.in_chans, kernel_size=1),
+            nn.PixelShuffle(self.encoder_stride),
+        )
+
+
+    def forward(self, x, mask):
+        # original GFM only uses RGB bands
+        x_rgb = x[:, :3]
+
+        # Encoder
+        r, _ = self.encoder(x, mask)
+        r_rgb, _ = self.encoder(x_rgb, mask)
+
+        # reconstructed image
+        x_rec = self.decoder(r)
+        x_rec_rgb = self.decoder(r_rgb)
+
+        mask_rgb = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
+            1).contiguous()
+
+        # L1-Loss for reconstruction
+        l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
+        l1_recon_loss_rgbi = (l1_loss_recon * mask_rgb).sum() / (mask_rgb.sum() + 1e-5) / self.in_chans
+
+        l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
+        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+
+
+        # L2-loss for reconstruction with higher account for outliers
+        l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
+        l2_recon_loss_rgbi = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+
+        l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
+        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+
+
+        return l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb
+
+def build_simmim_testing(config, logger):
+    model_type = config.MODEL.TYPE
+    if model_type == 'swin':
+        encoder = SwinTransformerForSimMIM(
+            img_size=config.DATA.IMG_SIZE,
+            patch_size=config.MODEL.SWIN.PATCH_SIZE,
+            in_chans=4, # New! original: config.MODEL.SWIN.IN_CHANS,
+            num_classes=0,
+            embed_dim=config.MODEL.SWIN.EMBED_DIM,
+            depths=config.MODEL.SWIN.DEPTHS,
+            num_heads=config.MODEL.SWIN.NUM_HEADS,
+            window_size=config.MODEL.SWIN.WINDOW_SIZE,
+            mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+            qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+            qk_scale=config.MODEL.SWIN.QK_SCALE,
+            drop_rate=config.MODEL.DROP_RATE,
+            drop_path_rate=config.MODEL.DROP_PATH_RATE,
+            ape=config.MODEL.SWIN.APE,
+            patch_norm=config.MODEL.SWIN.PATCH_NORM,
+            use_checkpoint=config.TRAIN.USE_CHECKPOINT)
+        encoder_stride = 32
+        """elif model_type == 'vit':
+        encoder = VisionTransformerForSimMIM(
+            img_size=config.DATA.IMG_SIZE,
+            patch_size=config.MODEL.VIT.PATCH_SIZE,
+            in_chans=config.MODEL.VIT.IN_CHANS,
+            num_classes=0,
+            embed_dim=config.MODEL.VIT.EMBED_DIM,
+            depth=config.MODEL.VIT.DEPTH,
+            num_heads=config.MODEL.VIT.NUM_HEADS,
+            mlp_ratio=config.MODEL.VIT.MLP_RATIO,
+            qkv_bias=config.MODEL.VIT.QKV_BIAS,
+            drop_rate=config.MODEL.DROP_RATE,
+            drop_path_rate=config.MODEL.DROP_PATH_RATE,
+            norm_layer=partial(nn.LayerNorm, eps=1e-6),
+            init_values=config.MODEL.VIT.INIT_VALUES,
+            use_abs_pos_emb=config.MODEL.VIT.USE_APE,
+            use_rel_pos_bias=config.MODEL.VIT.USE_RPB,
+            use_shared_rel_pos_bias=config.MODEL.VIT.USE_SHARED_RPB,
+            use_mean_pooling=config.MODEL.VIT.USE_MEAN_POOLING)
+        encoder_stride = 16"""
+    else:
+        raise NotImplementedError(f"Unknown pre-train model: {model_type}")
+
+    load_pretrained(config, encoder, logger)
+    model = SimMIM_testing(encoder=encoder, encoder_stride=encoder_stride)
+
+    return model
+
+
 def load_pretrained(config, model, logger):
     logger.info(f">>>>>>>>>> Fine-tuned from {config.PRETRAINED} ..........")
     checkpoint = torch.load(config.PRETRAINED, map_location='cpu')
