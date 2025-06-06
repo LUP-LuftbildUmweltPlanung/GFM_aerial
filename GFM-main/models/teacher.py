@@ -285,34 +285,37 @@ class SimMIM_testing(nn.Module):
 
     def forward(self, x, mask):
         # original GFM only uses RGB bands
-        x_rgb = x[:, :3]
+        #x_rgb = x[:, :3]
+        #r_rgb, _ = self.encoder(x_rgb, mask)
+        #x_rec_rgb = self.decoder(r_rgb)
+
 
         # Encoder
         r, _ = self.encoder(x, mask)
-        r_rgb, _ = self.encoder(x_rgb, mask)
 
         # reconstructed image
         x_rec = self.decoder(r)
-        x_rec_rgb = self.decoder(r_rgb)
 
-        mask_rgb = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
+        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
             1).contiguous()
 
         # L1-Loss for reconstruction
         l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        l1_recon_loss_rgbi = (l1_loss_recon * mask_rgb).sum() / (mask_rgb.sum() + 1e-5) / self.in_chans
-
-        l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
-        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
-
+        l1_recon_loss_rgbi = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
 
         # L2-loss for reconstruction with higher account for outliers
         l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
         l2_recon_loss_rgbi = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
 
-        l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
-        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        #l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
+        #l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        #l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
+        #l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        #l1_recon_loss_rgbi = l1_recon_loss_rgb
+        #l2_recon_loss_rgbi = l2_recon_loss_rgb
 
+        l1_recon_loss_rgb = l1_recon_loss_rgbi
+        l2_recon_loss_rgb = l2_recon_loss_rgbi
 
         return l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb
 
@@ -320,14 +323,15 @@ def build_simmim_testing(config, logger):
     model_type = config.MODEL.TYPE
     if model_type == 'swin':
         encoder = SwinTransformerForSimMIM(
-            img_size=config.DATA.IMG_SIZE,
+            img_size=config.DATA.TEACHER_IMG_SIZE,
             patch_size=config.MODEL.SWIN.PATCH_SIZE,
             in_chans=4, # New! original: config.MODEL.SWIN.IN_CHANS,
+            #in_chans=3, # New! original: config.MODEL.SWIN.IN_CHANS,
             num_classes=0,
             embed_dim=config.MODEL.SWIN.EMBED_DIM,
             depths=config.MODEL.SWIN.DEPTHS,
             num_heads=config.MODEL.SWIN.NUM_HEADS,
-            window_size=config.MODEL.SWIN.WINDOW_SIZE,
+            window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
             mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
             qkv_bias=config.MODEL.SWIN.QKV_BIAS,
             qk_scale=config.MODEL.SWIN.QK_SCALE,
@@ -337,7 +341,8 @@ def build_simmim_testing(config, logger):
             patch_norm=config.MODEL.SWIN.PATCH_NORM,
             use_checkpoint=config.TRAIN.USE_CHECKPOINT)
         encoder_stride = 32
-        """elif model_type == 'vit':
+        """
+        elif model_type == 'vit':
         encoder = VisionTransformerForSimMIM(
             img_size=config.DATA.IMG_SIZE,
             patch_size=config.MODEL.VIT.PATCH_SIZE,

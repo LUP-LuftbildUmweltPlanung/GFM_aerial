@@ -170,21 +170,6 @@ def main(config):
     model = build_simmim_testing(config, logger)
     model.cuda()
     logger.info(str(model))
-    #logger.info(torch.cuda.is_available())
-    #logger.info(torch.backends.cudnn.enabled)
-    #logger.info(f"device of model: {next(model.parameters()).device}")
-
-    optimizer = build_optimizer(config, model, logger, is_pretrain=True)
-    if config.AMP_OPT_LEVEL != "O0":
-        model, optimizer = amp.initialize(model, optimizer, opt_level=config.AMP_OPT_LEVEL)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
-    model_without_ddp = model.module
-
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(f"number of params: {n_parameters}")
-    if hasattr(model_without_ddp, 'flops'):
-        flops = model_without_ddp.flops()
-        logger.info(f"number of GFLOPs: {flops / 1e9}")
 
     logger.info("Start testing")
     start_time = time.time()
@@ -210,6 +195,37 @@ def main(config):
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Testing time {}'.format(total_time_str))
+
+
+def test_on_large_image(model, x_rgbi, mask, patch_size=192):
+
+    B, C, H, W = x_rgbi.shape
+    assert H % patch_size == 0 and W % patch_size == 0, "Image must be divisible by patch size"
+
+    l1_total, l2_total = 0.0, 0.0
+    patch_count = 0
+
+
+    for i in range(0, H, patch_size):
+        for j in range(0, W, patch_size):
+            x_patch = x_rgbi[:, :, i:i + patch_size, j:j + patch_size]
+            #print(x_patch.shape)
+            #mask_patch = torch.ones((x_patch.size(0), mask_dim, mask_dim)).to(x_patch.device)
+            #mask_patch = mask[:, i // patch_size:i // patch_size + 1, j // patch_size:j // patch_size + 1]
+            mask_patch = mask[:, i//4:i//4 + patch_size//4, j//4:j//4 + patch_size//4]
+
+            #print(mask_patch.shape)
+
+            l1_rgbi, l2_rgbi, a, b = model(x_patch, mask_patch)
+
+            l1_total += l1_rgbi.item()
+            l2_total += l2_rgbi.item()
+            patch_count += 1
+
+    avg_l1_loss = l1_total / patch_count
+    avg_l2_loss = l2_total / patch_count
+
+    return avg_l1_loss, avg_l2_loss, a, b
 
 @torch.no_grad()
 def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa_ind"):
@@ -247,14 +263,21 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb = model(img, mask)
+        #print(mask.shape)
+
+        #l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb = model(img, mask)
+        l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb = test_on_large_image(model, img, mask, patch_size=config.DATA.TEACHER_IMG_SIZE)
+
+
+
+
 
         torch.cuda.synchronize()
 
-        l1_recon_loss_rgbi_meter.update(l1_recon_loss_rgbi.item(), img.size(0))
-        l2_recon_loss_rgbi_meter.update(l2_recon_loss_rgbi.item(), img.size(0))
-        l1_recon_loss_rgb_meter.update(l1_recon_loss_rgb.item(), img.size(0))
-        l2_recon_loss_rgb_meter.update(l2_recon_loss_rgb.item(), img.size(0))
+        l1_recon_loss_rgbi_meter.update(l1_recon_loss_rgbi, img.size(0))
+        l2_recon_loss_rgbi_meter.update(l2_recon_loss_rgbi, img.size(0))
+        l1_recon_loss_rgb_meter.update(l1_recon_loss_rgb, img.size(0))
+        l2_recon_loss_rgb_meter.update(l2_recon_loss_rgb, img.size(0))
         batch_time.update(time.time() - end)
         end = time.time()
 
