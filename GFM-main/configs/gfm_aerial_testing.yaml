@@ -1,6 +1,6 @@
 MODEL:
   TYPE: swin
-  NAME: gfmaerial_test
+  NAME: gfmaerial_test_gfm
   DROP_PATH_RATE: 0.0
   SWIN:
     EMBED_DIM: 128
@@ -16,6 +16,8 @@ DATA:
   DATA_TRAIN_PATH: ""
   DATA_VALI_PATH_TEMP_IND: "/nne_mount/Vera/Data/Test/test_temp_ind_noHH_with_vali_samples.lmdb"
   DATA_VALI_PATH_SPA_IND: "/nne_mount/Vera/Data/Test/test_spatially_ind.lmdb"
+  #DATA_VALI_PATH_TEMP_IND: "/nne_mount/Vera/Data/Test/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
+  #DATA_VALI_PATH_SPA_IND: "/nne_mount/Vera/Data/Test/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
   DATA_VALI_PATH_TEMP_SPA_IND: "/nne_mount/Vera/Data/Test/test_spati_temp_ind_noHH_with_vali_samples.lmdb"
 TRAIN:
   EPOCHS: 4 #100
