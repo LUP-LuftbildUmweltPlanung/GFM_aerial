@@ -1,4 +1,4 @@
-# Project Title
+# GFM-aerial
 
 Adaptation of the [GFM](https://github.com/mmendiet/GFM) by Mendieta et al. to German aerial images in RGBI format. 
 
