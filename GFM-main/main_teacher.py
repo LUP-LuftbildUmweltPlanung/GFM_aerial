@@ -171,9 +171,6 @@ def main(config):
     model = build_simmim(config, logger)
     model.cuda()
     logger.info(str(model))
-    #logger.info(torch.cuda.is_available())
-    #logger.info(torch.backends.cudnn.enabled)
-    #logger.info(f"device of model: {next(model.parameters()).device}")
 
     optimizer = build_optimizer(config, model, logger, is_pretrain=True)
     if config.AMP_OPT_LEVEL != "O0":
@@ -255,10 +252,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):#, train_log_table, train_header):
-    #logger.info(torch.cuda.is_available())
-    #logger.info(torch.backends.cudnn.enabled)
-    #logger.info(f"device of model: {next(model.parameters()).device}")
+def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     model.train()
     optimizer.zero_grad()
 
@@ -291,10 +285,10 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
     for idx, batch in enumerate(data_loader):
 
-        if config.DATA.DATA_TRAIN_PATH.endswith(".lmdb"):
-            img, mask = batch  # Falls LMDB nur 2 Werte liefert
-        else:
-            img, mask, _ = batch  # Falls GeoPileV0 ein drittes Element zurückgibt
+        #if config.DATA.DATA_TRAIN_PATH.endswith(".lmdb"):
+        #    img, mask = batch
+        #else:
+        img, mask, _ = batch
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
@@ -305,13 +299,9 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
         recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
         dist_loss_meter.update(distillation_loss.item(), img.size(0))
 
-        #logger.info(f"losses: {loss}, {reconstruction_loss}, {distillation_loss}")
-        #logger.info(loss_meter.avg)
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
-            #reconstruction_loss = reconstruction_loss / config.TRAIN.ACCUMULATION_STEPS
-            #distillation_loss = distillation_loss / config.TRAIN.ACCUMULATION_STEPS
             if config.AMP_OPT_LEVEL != "O0":
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -356,8 +346,6 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        #logger.info(loss_meter.avg)
-
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
@@ -398,9 +386,6 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
 @torch.no_grad()
 def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key="spa_ind"):
-    #logger.info(torch.cuda.is_available())
-    #logger.info(torch.backends.cudnn.enabled)
-    #logger.info(f"device of model: {next(model.parameters()).device}")
     model.eval()
 
     batch_time = AverageMeter()
@@ -426,15 +411,15 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
     num_steps = len(data_loader)
 
     for idx, batch in enumerate(data_loader):
-        if lmdb_key:
-            img, mask = batch
-        else:
-            img, mask, _ = batch
+        #if lmdb_key:
+        #    img, mask = batch
+        #else:
+        img, mask, _ = batch
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        loss, reconstruction_loss, distillation_loss  = model(img, mask)
+        loss, reconstruction_loss, distillation_loss = model(img, mask)
 
         torch.cuda.synchronize()
 
@@ -454,7 +439,7 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
 
-    epoch_end = time.time() # time.performancecounter
+    epoch_end = time.time()
     epoch_time = epoch_end - start
     curr_list = [epoch,
                  loss_meter.avg,

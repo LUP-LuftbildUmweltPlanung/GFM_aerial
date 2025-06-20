@@ -106,13 +106,10 @@ class SimMIMTransform:
         )
 
     def ensure_four_channels(self, img):
-        """
-        Stellt sicher, dass der Tensor 4 Kanäle hat. Falls das Bild nur 3 Kanäle hat, wird ein zusätzlicher Alpha-Kanal (0.5) hinzugefügt.
-        """
         if isinstance(img, torch.Tensor):
-            if img.shape[0] == 3:  # Falls nur 3 Kanäle vorhanden sind (C, H, W)
+            if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
                 alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
-                img = torch.cat([img, alpha_channel], dim=0)  # Fügt den vierten Kanal hinzu (RGBA)
+                img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
         return img
 
     def __call__(self, img):
@@ -139,7 +136,7 @@ def collate_fn(batch):
 
 class LMDBSafetensorDataset(Dataset):
     """
-    LMDB Dataset für das Laden von Safetensors direkt als Dictionary.
+    LMDB Dataset for loading data from lmdb instead of tiff files.
     """
 
     def __init__(self, lmdb_path, transform=None):
@@ -147,7 +144,6 @@ class LMDBSafetensorDataset(Dataset):
         self.transform = transform
         self.env = lmdb.open(lmdb_path, readonly=True, lock=False)
 
-        # Alle Keys abrufen
         with self.env.begin() as txn:
             self.keys = [key.decode() for key, _ in txn.cursor()]
 
@@ -155,17 +151,13 @@ class LMDBSafetensorDataset(Dataset):
         return len(self.keys)
 
     def __getitem__(self, index):
-        """
-        Lädt ein komplettes Safetensor-Dictionary aus LMDB.
-        """
         key = self.keys[index]
         with self.env.begin() as txn:
             safetensor_data = txn.get(key.encode())
 
         if safetensor_data is None:
-            raise KeyError(f"❌ Kein Eintrag für '{key}' gefunden in LMDB!")
+            raise KeyError(f"No entry for '{key}' was found in the lmdb!")
 
-        # Safetensor direkt als Dictionary zurückgeben
         bands_dict = load(safetensor_data)
 
         self.selected_bands = sorted(list(bands_dict.keys()))
@@ -173,18 +165,16 @@ class LMDBSafetensorDataset(Dataset):
         band_arrays = [bands_dict[b] for b in self.selected_bands if b in bands_dict]
 
         if len(band_arrays) == 0:
-            raise ValueError(f"❌ Keine gültigen Bänder in '{key}' gefunden!")
+            raise ValueError(f"No band entries found for '{key}'!")
 
         stacked_array = np.stack(band_arrays)  # Shape: (C, H, W)
 
-        # In PyTorch-Tensor umwandeln
         tensor = torch.from_numpy(stacked_array).float()
 
-        # Transformation anwenden (falls vorhanden)
         if self.transform:
             tensor = self.transform(tensor)
 
-        return tensor
+        return tensor, key
 
 def build_loader_simmim(config, logger, is_train=True, vali_key=None):
     if is_train:
@@ -198,7 +188,7 @@ def build_loader_simmim(config, logger, is_train=True, vali_key=None):
     logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
 
     if data_path.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
+        logger.info(f"Load LMDB: {data_path}")
         dataset = LMDBSafetensorDataset(data_path, transform)
     elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
         datasets = []
