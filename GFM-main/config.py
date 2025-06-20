@@ -24,6 +24,7 @@ _C.DATA.DATA_TRAIN_PATH = ''
 _C.DATA.DATA_VALI_PATH_TEMP_IND = ''
 _C.DATA.DATA_VALI_PATH_SPA_IND = ''
 _C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
+_C.DATA.OUTPUT_LMDB = None
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
 # Input image size
