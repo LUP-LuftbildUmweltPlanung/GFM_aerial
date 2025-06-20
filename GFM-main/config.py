@@ -19,7 +19,6 @@ _C.DATA = CN()
 # Batch size for a single GPU, could be overwritten by command line argument
 _C.DATA.BATCH_SIZE = 128
 # Path to dataset, could be overwritten by command line argument
-#_C.DATA.DATA_PATH = ''
 _C.DATA.DATA_TRAIN_PATH = ''
 _C.DATA.DATA_VALI_PATH_TEMP_IND = ''
 _C.DATA.DATA_VALI_PATH_SPA_IND = ''
@@ -235,8 +234,6 @@ def update_config(config, args):
     # merge from specific arguments
     if _check_args('batch_size'):
         config.DATA.BATCH_SIZE = args.batch_size
-    #if _check_args('data_path'):
-    #    config.DATA.DATA_PATH = args.data_path
     if _check_args('resume'):
         config.MODEL.RESUME = args.resume
     if _check_args('pretrained'):
@@ -273,7 +270,7 @@ def update_config(config, args):
     config.OUTPUT = os.path.join(config.OUTPUT, config.MODEL.NAME, config.TAG)
 
     # output stats folder
-    config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats_swin_grad_acc")
+    config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats")
 
     config.freeze()
 

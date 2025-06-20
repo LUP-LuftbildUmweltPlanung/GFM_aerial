@@ -140,9 +140,6 @@ class SimMIM(nn.Module):
         else:
             z_t = self.teacher(x_rgb)
 
-        # learned linear projection from RGBI-projector to RGB-projector to compare with teacher embedding
-        #zs_rgb = self.linear_proj_rgb(zs_full)
-
         # reconstructed RGBI image
         x_rec = self.decoder(r)
 
@@ -158,7 +155,6 @@ class SimMIM(nn.Module):
 
         # Full loss is sum of reconstruction loss and distillation loss
         loss += -(
-            #self.cos(zs_rgb, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
             self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
 
         return loss, reconstruction_loss, distillation_loss
@@ -267,16 +263,18 @@ class SwinTeacher(SwinTransformer):
         x = self.forward_features(x)
         return x
 
-
-
-
-class SimMIM_testing(nn.Module):
-    def __init__(self, encoder, encoder_stride):
+class SimMIM_testing2(nn.Module):
+    def __init__(self, encoder, encoder_stride, teacher):
         super().__init__()
         self.encoder = encoder
         self.encoder_stride = encoder_stride
+        self.teacher = teacher
+
         self.in_chans = self.encoder.in_chans
         self.patch_size = self.encoder.patch_size
+
+        #New: to make forward adaptable to different image sizes
+        self.img_size = self.teacher.img_size
 
         self.decoder = nn.Sequential(
             nn.Conv2d(
@@ -285,56 +283,82 @@ class SimMIM_testing(nn.Module):
             nn.PixelShuffle(self.encoder_stride),
         )
 
+        self.projector = nn.Linear(self.encoder.num_features, self.encoder.num_features)
+        self.cos = nn.CosineSimilarity(dim=1)
 
     def forward(self, x, mask):
-        # original GFM only uses RGB bands
-        #x_rgb = x[:, :3]
-        #r_rgb, _ = self.encoder(x_rgb, mask)
-        #x_rec_rgb = self.decoder(r_rgb)
+        ################## NEW: x for encoder with RGBI, x for teacher with RGB ######################
 
 
-        # Encoder
-        r, _ = self.encoder(x, mask)
+        if self.in_chans == 4:
+            # Encoder uses RGBI input
+            r, _ = self.encoder(x, mask)
 
-        # reconstructed image
-        x_rec = self.decoder(r)
+            # Teacher only uses RGB bands
+            x_rgb = x[:, :3]
+            x_i = x[:,3]
+
+            # reconstructed RGBI image
+            x_rec = self.decoder(r)
+
+            x_rec_rgb = x_rec[:, :3]
+            x_rec_i = x_rec[:,3]
+
+        else:
+            # Teacher only uses RGB bands
+            x_rgb = x[:, :3]
+            # Encoder uses RGBI input
+            r, _ = self.encoder(x_rgb, mask)
+            # reconstructed RGBI image
+            x_rec_rgb = self.decoder(r)
+            x_rec = x_rec_rgb
+
+            rgbi_losses = None
+
 
         mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
             1).contiguous()
+        mask_i = mask.squeeze(1)
 
-        # L1-Loss for reconstruction
-        l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        l1_recon_loss_rgbi = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        if self.in_chans == 4:
+            # L1-Loss for reconstruction
+            l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
+            l1_recon_loss = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4
 
-        # L2-loss for reconstruction with higher account for outliers
-        l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
-        l2_recon_loss_rgbi = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+            l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
+            l2_recon_loss = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4
 
-        #l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
-        #l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
-        #l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
-        #l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
-        #l1_recon_loss_rgbi = l1_recon_loss_rgb
-        #l2_recon_loss_rgbi = l2_recon_loss_rgb
+            l1_loss_recon_i = F.l1_loss(x_i, x_rec_i, reduction='none')
+            l1_recon_loss_i = (l1_loss_recon_i * mask_i).sum() / (mask_i.sum() + 1e-5)
 
-        l1_recon_loss_rgb = l1_recon_loss_rgbi
-        l2_recon_loss_rgb = l2_recon_loss_rgbi
+            l2_loss_recon_i = F.mse_loss(x_rec_i, x_i, reduction='none')
+            l2_recon_loss_i = (l2_loss_recon_i * mask_i).sum() / (mask_i.sum() + 1e-5)
 
-        return l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb
+            rgbi_losses = [l1_recon_loss, l2_recon_loss, l1_recon_loss_i, l2_recon_loss_i]
 
-def build_simmim_testing(config, logger):
+
+        l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
+        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3
+
+        l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
+        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3
+
+        return rgbi_losses, [l1_recon_loss_rgb, l2_recon_loss_rgb], x_rec
+
+
+
+def build_simmim_testing2(config, logger):
     model_type = config.MODEL.TYPE
     if model_type == 'swin':
         encoder = SwinTransformerForSimMIM(
-            img_size=config.DATA.TEACHER_IMG_SIZE,
+            img_size=config.DATA.IMG_SIZE,
             patch_size=config.MODEL.SWIN.PATCH_SIZE,
-            in_chans=4, # New! original: config.MODEL.SWIN.IN_CHANS,
-            #in_chans=3, # New! original: config.MODEL.SWIN.IN_CHANS,
+            in_chans= config.MODEL.SWIN.IN_CHANS,
             num_classes=0,
             embed_dim=config.MODEL.SWIN.EMBED_DIM,
             depths=config.MODEL.SWIN.DEPTHS,
             num_heads=config.MODEL.SWIN.NUM_HEADS,
-            window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
+            window_size=config.MODEL.SWIN.WINDOW_SIZE,
             mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
             qkv_bias=config.MODEL.SWIN.QKV_BIAS,
             qk_scale=config.MODEL.SWIN.QK_SCALE,
@@ -344,8 +368,7 @@ def build_simmim_testing(config, logger):
             patch_norm=config.MODEL.SWIN.PATCH_NORM,
             use_checkpoint=config.TRAIN.USE_CHECKPOINT)
         encoder_stride = 32
-        """
-        elif model_type == 'vit':
+        """elif model_type == 'vit':
         encoder = VisionTransformerForSimMIM(
             img_size=config.DATA.IMG_SIZE,
             patch_size=config.MODEL.VIT.PATCH_SIZE,
@@ -367,9 +390,27 @@ def build_simmim_testing(config, logger):
         encoder_stride = 16"""
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
-
-    load_pretrained(config, encoder, logger)
-    model = SimMIM_testing(encoder=encoder, encoder_stride=encoder_stride)
+    teacher = SwinTeacher(
+        img_size=config.DATA.TEACHER_IMG_SIZE, #config.DATA.IMG_SIZE,
+        patch_size=config.MODEL.SWIN.PATCH_SIZE,
+        in_chans=3,
+        num_classes= 0,
+        embed_dim=config.MODEL.SWIN.EMBED_DIM,
+        depths=config.MODEL.SWIN.DEPTHS,
+        num_heads=config.MODEL.SWIN.NUM_HEADS,
+        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
+        mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+        qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+        qk_scale=config.MODEL.SWIN.QK_SCALE,
+        drop_rate=config.MODEL.DROP_RATE,
+        drop_path_rate=config.MODEL.DROP_PATH_RATE,
+        ape=config.MODEL.SWIN.APE,
+        patch_norm=config.MODEL.SWIN.PATCH_NORM,
+        use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+        alpha=config.ALPHA
+    )
+    load_pretrained(config, teacher, logger)
+    model = SimMIM_testing2(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
 
     return model
 
@@ -396,7 +437,7 @@ def load_pretrained(config, model, logger):
         if checkpoint_model['patch_embed.proj.weight'].shape[1]==1:
             # greyscale pretrained model
             temp = checkpoint_model['patch_embed.proj.weight'].repeat(1, temp.shape[1],1,1)
-        elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 12 and temp.shape[1] == 3: 
+        elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 12 and temp.shape[1] == 3:
             # For 12 band pretrained, the order is CGBR...
             temp[:,:,:,:] = checkpoint_model['patch_embed.proj.weight'][:,[3,2,1],:,:]
         elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 8:

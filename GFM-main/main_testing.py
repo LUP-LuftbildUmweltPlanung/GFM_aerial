@@ -16,21 +16,20 @@ import torch.distributed as dist
 from timm.utils import AverageMeter
 
 import pandas as pd
-import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 from mlflow_config import *
 
 from config import get_config
-# from models import build_model
-from models.teacher import build_simmim_testing
+from models.teacher import build_simmim_testing2
 from data import build_loader
-from lr_scheduler import build_scheduler
-from optimizer import build_optimizer
 from logger import create_logger
-from utils import load_checkpoint, save_checkpoint, get_grad_norm, auto_resume_helper, write_epoch_to_csv
+from utils import write_epoch_to_csv
 
 from pathlib import Path
+import torchvision.transforms as T
+
+from encode_to_lmdb_simple import save_bands_to_safetensor, write_to_lmdb, create_or_open_lmdb
 
 try:
     # noinspection PyUnresolvedReferences
@@ -52,7 +51,7 @@ def setup_mlflow_function():
     client = MlflowClient()
 
     # Define Experiment Name
-    experiment_name = "GFMaerial_swin_teacher"
+    experiment_name = "GFM-aerial_testing"
 
     # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
@@ -161,71 +160,161 @@ def parse_option():
     return args, config
 
 
+def load_model_testing(config, model, logger):
+    logger.info(f">>>>>>>>>> Resuming from {config.MODEL.RESUME} ..........")
+    if config.MODEL.RESUME.startswith('https'):
+        checkpoint = torch.hub.load_state_dict_from_url(
+            config.MODEL.RESUME, map_location='cpu', check_hash=True)
+    else:
+        checkpoint = torch.load(config.MODEL.RESUME, map_location='cpu')
+    msg = model.load_state_dict(checkpoint['model'], strict=False)
+    logger.info(msg)
+    del checkpoint
+    torch.cuda.empty_cache()
+    return
+
+
 def main(config):
     data_loader_vali_temp_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=0)
     data_loader_vali_spa_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=1)
     data_loader_vali_temp_spa_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=2)
 
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
-    model = build_simmim_testing(config, logger)
+    model = build_simmim_testing2(config, logger)
     model.cuda()
-    logger.info(str(model))
+    #logger.info(str(model))
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
+    model_without_ddp = model.module
+
+    load_model_testing(config, model_without_ddp, logger)
 
     logger.info("Start testing")
     start_time = time.time()
 
-    loss_log_header = ["avg_l1_rgbi", "avg_l2_rgbi", "avg_l1_rgb","avg_l2_rgb"]
+    loss_log_header = ["avg_l1_rgbi", "avg_l2_rgbi", "avg_l1_infrared", "avg_l2_infrared", "avg_l1_rgb", "avg_l2_rgb"]
 
-    l1_rgbi_temp_ind, l2_rgbi_temp_ind, l1_rgb_temp_ind, l2_rgb_temp_ind = test_generalization(config, model, data_loader_vali_temp_ind, test_key="temp_ind")
-    l1_rgbi_spa_ind, l2_rgbi_spa_ind, l1_rgb_spa_ind, l2_rgb_spa_ind = test_generalization(config, model, data_loader_vali_spa_ind, test_key="spa_ind")
-    l1_rgbi_temp_spa_ind, l2_rgbi_temp_spa_ind, l1_rgb_temp_spa_ind, l2_rgb_temp_spa_ind = test_generalization(config, model, data_loader_vali_temp_spa_ind, test_key="temp_spa_ind")
+    l1_rgbi_temp_ind, l2_rgbi_temp_ind, l1_i_temp_ind, l2_i_temp_ind, l1_rgb_temp_ind, l2_rgb_temp_ind = test_generalization(config, model, data_loader_vali_temp_ind, test_key="temp_ind")
+    l1_rgbi_spa_ind, l2_rgbi_spa_ind, l1_i_spa_ind, l2_i_spa_ind, l1_rgb_spa_ind, l2_rgb_spa_ind = test_generalization(config, model, data_loader_vali_spa_ind, test_key="spa_ind")
+    l1_rgbi_temp_spa_ind, l2_rgbi_temp_spa_ind, l1_i_temp_spa_ind, l2_i_temp_spa_ind, l1_rgb_temp_spa_ind, l2_rgb_temp_spa_ind = test_generalization(config, model, data_loader_vali_temp_spa_ind, test_key="temp_spa_ind")
     avg_l1_rgbi = (l1_rgbi_temp_ind + l1_rgbi_spa_ind+l1_rgbi_temp_spa_ind)/3
     avg_l2_rgbi = (l2_rgbi_temp_ind + l2_rgbi_spa_ind+l2_rgbi_temp_spa_ind)/3
-    avg_l1_rgb = (l1_rgb_temp_ind + l1_rgb_spa_ind+l1_rgb_temp_spa_ind)/3
-    avg_l2_rgb = (l2_rgb_temp_ind + l2_rgb_spa_ind+l2_rgb_temp_spa_ind)/3
+    avg_l1_i = (l1_i_temp_ind + l1_i_spa_ind + l1_i_temp_spa_ind) / 3
+    avg_l2_i = (l2_i_temp_ind + l2_i_spa_ind + l2_i_temp_spa_ind) / 3
+    avg_l1_rgb = (l1_rgb_temp_ind + l1_rgb_spa_ind + l1_rgb_temp_spa_ind) / 3
+    avg_l2_rgb = (l2_rgb_temp_ind + l2_rgb_spa_ind + l2_rgb_temp_spa_ind) / 3
 
-    avg_log_loss = [avg_l1_rgbi, avg_l2_rgbi, avg_l1_rgb,avg_l2_rgb]
+    avg_log_loss = [avg_l1_rgbi, avg_l2_rgbi, avg_l1_i, avg_l2_i, avg_l1_rgb, avg_l2_rgb]
 
     write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "avg_test_loss_log_table.csv"), avg_log_loss, loss_log_header)
 
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+
     if dist.get_rank() == 0:
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Testing time {}'.format(total_time_str))
 
+def inverse_normalize(x):
+    #mean: (0.485, 0.456, 0.406, 0.5947974324226379)
+    #std: (0.229, 0.224, 0.225, 0.19213160872459412)
 
-def test_on_large_image(model, x_rgbi, mask, patch_size=192):
+    if x.size(0)==4:
+        inv_norm = T.Compose([T.Normalize(mean=[0., 0., 0., 0.], std=[1/0.229, 1/0.224, 1/0.225, 1/0.19213160872459412]),
+                              T.Normalize(mean=[-0.485, -0.456, -0.406, -0.5947974324226379], std=[1., 1., 1., 1.])
+                              ])
+    else:
+        inv_norm = T.Compose([T.Normalize(mean=[0., 0., 0.],
+                                          std=[1 / 0.229, 1 / 0.224, 1 / 0.225]),
+                              T.Normalize(mean=[-0.485, -0.456, -0.406],
+                                          std=[1., 1., 1.])
+                              ])
+
+    return inv_norm(x)
+
+def save_in_lmdb(db, x_reconstructed, key):
+
+    for i in range(len(key)):
+        # img shape: (B, 4, H, W)
+        img_inv = inverse_normalize(x_reconstructed[i])
+        img_inv = (img_inv * 255.0).clamp(0, 255).to(torch.uint8)
+
+        #### visualize mask:
+        #img_inv = x_reconstructed.to(torch.uint8)
+
+        bands_dict = {}
+        for j in range(img_inv.size(0)):
+            bands_dict[f"{j}"] = img_inv[j].cpu().numpy()
+
+        safetensor_img = save_bands_to_safetensor(bands_dict)
+
+        write_to_lmdb(db, key[i], safetensor_img)
+    logger.info("reconstructed batch written to lmdb")
+    return
+
+
+def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
+    patch_size = config.DATA.IMG_SIZE
 
     B, C, H, W = x_rgbi.shape
     assert H % patch_size == 0 and W % patch_size == 0, "Image must be divisible by patch size"
-
-    l1_total, l2_total = 0.0, 0.0
     patch_count = 0
 
+    rgbi_total = [0.0,0.0,0.0,0.0]
+    rgb_total = [0.0,0.0]
+    avg_rgbi_loss = []
+    avg_rgb_loss = []
+
+    if output_lmdb:
+        aggregated_x_rec = torch.zeros(x_rgbi.shape)
+
+        #### visualize mask:
+        #aggregated_mask = torch.zeros(x_rgbi.shape)
 
     for i in range(0, H, patch_size):
         for j in range(0, W, patch_size):
             x_patch = x_rgbi[:, :, i:i + patch_size, j:j + patch_size]
-            #print(x_patch.shape)
-            #mask_patch = torch.ones((x_patch.size(0), mask_dim, mask_dim)).to(x_patch.device)
-            #mask_patch = mask[:, i // patch_size:i // patch_size + 1, j // patch_size:j // patch_size + 1]
-            mask_patch = mask[:, i//4:i//4 + patch_size//4, j//4:j//4 + patch_size//4]
+            mask_patch = mask
 
-            #print(mask_patch.shape)
+            if output_lmdb: #TODO
+                rgbi_losses, rgb_losses, x_reconstructed = model(x_patch, mask_patch)
 
-            l1_rgbi, l2_rgbi, a, b = model(x_patch, mask_patch)
+                #### visualize mask:
+                #rgbi_losses, rgb_losses, fullmask = model(x_patch, mask_patch)
 
-            l1_total += l1_rgbi.item()
-            l2_total += l2_rgbi.item()
+                aggregated_x_rec[:,:config.MODEL.SWIN.IN_CHANS,i:i+patch_size, j:j + patch_size] = x_reconstructed
+
+                #### visualize mask:
+                #aggregated_mask[:,0,i:i+patch_size, j:j + patch_size] = fullmask.squeeze()
+            else:
+                rgbi_losses, rgb_losses, _ = model(x_patch, mask_patch)
+
+            if config.MODEL.SWIN.IN_CHANS == 4:
+                rgbi_total[0] += rgbi_losses[0].item()
+                rgbi_total[1] += rgbi_losses[1].item()
+                rgbi_total[2] += rgbi_losses[2].item()
+                rgbi_total[3] += rgbi_losses[3].item()
+            rgb_total[0] += rgb_losses[0].item()
+            rgb_total[1] += rgb_losses[1].item()
             patch_count += 1
 
-    avg_l1_loss = l1_total / patch_count
-    avg_l2_loss = l2_total / patch_count
+    if output_lmdb:
+        db = create_or_open_lmdb(output_lmdb)
+        save_in_lmdb(db, aggregated_x_rec, key)
 
-    return avg_l1_loss, avg_l2_loss, a, b
+        #### visualize mask:
+        #save_in_lmdb(db, aggregated_mask, key)
+
+    if config.MODEL.SWIN.IN_CHANS == 4:
+        avg_rgbi_loss.append(rgbi_total[0] / patch_count)
+        avg_rgbi_loss.append(rgbi_total[1] / patch_count)
+        avg_rgbi_loss.append(rgbi_total[2] / patch_count)
+        avg_rgbi_loss.append(rgbi_total[3] / patch_count)
+    avg_rgb_loss.append(rgb_total[0] / patch_count)
+    avg_rgb_loss.append(rgb_total[1] / patch_count)
+
+    return avg_rgbi_loss, avg_rgb_loss
 
 @torch.no_grad()
 def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa_ind"):
@@ -234,6 +323,9 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
     batch_time = AverageMeter()
     l1_recon_loss_rgbi_meter = AverageMeter()
     l2_recon_loss_rgbi_meter = AverageMeter()
+    l1_recon_loss_infrared_meter = AverageMeter()
+    l2_recon_loss_infrared_meter = AverageMeter()
+
     l1_recon_loss_rgb_meter = AverageMeter()
     l2_recon_loss_rgb_meter = AverageMeter()
 
@@ -241,6 +333,10 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
                    "l1_recon_loss_rgbi_meter_avg",
                    "l2_recon_loss_rgbi_meter_val",
                    "l2_recon_loss_rgbi_meter_avg",
+                   "l1_recon_loss_infrared_meter_val",
+                   "l1_recon_loss_infrared_meter_avg",
+                   "l2_recon_loss_infrared_meter_val",
+                   "l2_recon_loss_infrared_meter_avg",
                    "l1_recon_loss_rgb_meter_val",
                    "l1_recon_loss_rgb_meter_avg",
                    "l2_recon_loss_rgb_meter_val",
@@ -256,28 +352,26 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
 
     for idx, batch in enumerate(data_loader):
         if lmdb_key:
-            img, mask = batch
+            img, mask, key = batch
         else:
+            key = None
             img, mask, _ = batch
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
-
-        #print(mask.shape)
-
-        #l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb = model(img, mask)
-        l1_recon_loss_rgbi, l2_recon_loss_rgbi, l1_recon_loss_rgb, l2_recon_loss_rgb = test_on_large_image(model, img, mask, patch_size=config.DATA.TEACHER_IMG_SIZE)
-
-
-
-
+        losses_rgbi, losses_rgb = test_on_large_image(config, model, img, mask, key, output_lmdb=config.DATA.OUTPUT_LMDB)
 
         torch.cuda.synchronize()
 
-        l1_recon_loss_rgbi_meter.update(l1_recon_loss_rgbi, img.size(0))
-        l2_recon_loss_rgbi_meter.update(l2_recon_loss_rgbi, img.size(0))
-        l1_recon_loss_rgb_meter.update(l1_recon_loss_rgb, img.size(0))
-        l2_recon_loss_rgb_meter.update(l2_recon_loss_rgb, img.size(0))
+        if config.MODEL.SWIN.IN_CHANS == 4:
+            l1_recon_loss_rgbi_meter.update(losses_rgbi[0], img.size(0))
+            l2_recon_loss_rgbi_meter.update(losses_rgbi[1], img.size(0))
+            l1_recon_loss_infrared_meter.update(losses_rgbi[2], img.size(0))
+            l2_recon_loss_infrared_meter.update(losses_rgbi[3], img.size(0))
+
+        l1_recon_loss_rgb_meter.update(losses_rgb[0], img.size(0))
+        l2_recon_loss_rgb_meter.update(losses_rgb[1], img.size(0))
+
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -288,10 +382,12 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
                 f'Test: [{idx}/{num_steps}]\t'
                 f'eta {datetime.timedelta(seconds=int(etas))}\t'
                 f'time {batch_time.val:.4f} ({batch_time.avg:.4f})\t'
-                f'loss {l1_recon_loss_rgbi_meter.val:.4f} ({l1_recon_loss_rgbi_meter.avg:.4f})\t'
-                f'loss {l2_recon_loss_rgbi_meter.val:.4f} ({l2_recon_loss_rgbi_meter.avg:.4f})\t'
-                f'loss {l1_recon_loss_rgb_meter.val:.4f} ({l1_recon_loss_rgb_meter.avg:.4f})\t'
-                f'loss {l2_recon_loss_rgb_meter.val:.4f} ({l2_recon_loss_rgb_meter.avg:.4f})\t'
+                f'l1 rgbi loss {l1_recon_loss_rgbi_meter.val:.4f} ({l1_recon_loss_rgbi_meter.avg:.4f})\t'
+                f'l2 rgbi loss {l2_recon_loss_rgbi_meter.val:.4f} ({l2_recon_loss_rgbi_meter.avg:.4f})\t'
+                f'l1 infrared loss {l1_recon_loss_infrared_meter.val:.4f} ({l1_recon_loss_infrared_meter.avg:.4f})\t'
+                f'l2 infrared loss {l2_recon_loss_infrared_meter.val:.4f} ({l2_recon_loss_infrared_meter.avg:.4f})\t'
+                f'l1 rgb loss {l1_recon_loss_rgb_meter.val:.4f} ({l1_recon_loss_rgb_meter.avg:.4f})\t'
+                f'l2 rgb loss {l2_recon_loss_rgb_meter.val:.4f} ({l2_recon_loss_rgb_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
 
     testing_time = time.time() - start
@@ -299,6 +395,10 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
                  l1_recon_loss_rgbi_meter.avg,
                  l2_recon_loss_rgbi_meter.val,
                  l2_recon_loss_rgbi_meter.avg,
+                 l1_recon_loss_infrared_meter.val,
+                 l1_recon_loss_infrared_meter.avg,
+                 l2_recon_loss_infrared_meter.val,
+                 l2_recon_loss_infrared_meter.avg,
                  l1_recon_loss_rgb_meter.val,
                  l1_recon_loss_rgb_meter.avg,
                  l2_recon_loss_rgb_meter.val,
@@ -312,9 +412,9 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
 
 
     logger.info(f"Testing takes {datetime.timedelta(seconds=int(testing_time))}")
-    logger.info(f"Test Loss: {l2_recon_loss_rgbi_meter.avg:.4f}")
+    logger.info(f"l2 rgbi Loss: {l2_recon_loss_rgbi_meter.avg:.4f}, l2 rgb loss: {l2_recon_loss_rgb_meter.avg:.4f}, l2 infrared loss: {l2_recon_loss_infrared_meter.avg:.4f} ")
 
-    return l1_recon_loss_rgbi_meter.avg, l2_recon_loss_rgbi_meter.avg, l1_recon_loss_rgb_meter.avg, l2_recon_loss_rgb_meter.avg
+    return l1_recon_loss_rgbi_meter.avg, l2_recon_loss_rgbi_meter.avg, l1_recon_loss_infrared_meter.avg, l2_recon_loss_infrared_meter.avg, l1_recon_loss_rgb_meter.avg, l2_recon_loss_rgb_meter.avg
 
 
 if __name__ == '__main__':
