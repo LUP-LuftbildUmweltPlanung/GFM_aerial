@@ -135,7 +135,10 @@ class SimMIM(nn.Module):
 
         # Teacher only uses RGB bands
         x_rgb = x[:, :3]
-        z_t = self.teacher(F.interpolate(x_rgb, (self.img_size, self.img_size), mode='bilinear', align_corners=True))
+        if x_rgb.shape[-2:] != (self.img_size, self.img_size):
+            z_t = self.teacher(F.interpolate(x_rgb, (self.img_size, self.img_size), mode='bilinear', align_corners=True))
+        else:
+            z_t = self.teacher(x_rgb)
 
         # learned linear projection from RGBI-projector to RGB-projector to compare with teacher embedding
         #zs_rgb = self.linear_proj_rgb(zs_full)
