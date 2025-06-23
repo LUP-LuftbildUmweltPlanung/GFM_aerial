@@ -5,7 +5,7 @@ Adaptation of the [GFM](https://github.com/mmendiet/GFM) by Mendieta et al. to G
 ## Model structure
 <img src="img/Model_structure.png"/>
 
-## Getting Started
+## Getting started
 
 ### Dependencies
 So far, this code has only been tested on Linux systems with a single GPU.
@@ -26,6 +26,7 @@ cd apex
 pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 ```
 
+
 ### Executing pretraining - GFM teacher
 If you want to use the GFM by Mendieta et al. as teacher, download it from [here](https://onedrive.live.com/?redeem=aHR0cHM6Ly8xZHJ2Lm1zL2YvcyFBa1RuNzZtOTA3T1RocFJKakg4ZWhmc2tiZ0NMWHc%5FZT1aSnJlRm8&id=93B3D3BDA9EFE744%21100937&cid=93B3D3BDA9EFE744)
 You need to set the following values in gfm_aerial_pretraining.yaml:
@@ -38,7 +39,7 @@ Modify the yaml file with the paths to your datasets.
 
 Run pretraining with this line:
 ```
-python -m torch.distributed.launch --nproc_per_node 1 main_teacher.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm --pretrained output/simmim_finetune/gfm.pth
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_teacher.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm --pretrained GFM-main/output/simmim_finetune/gfm.pth
 ```
 
 ### Executing pretraining - Swin teacher
@@ -56,7 +57,7 @@ Modify the yaml file with the paths to your datasets.
 
 Run pretraining with this line:
 ```
-python -m torch.distributed.launch --nproc_per_node 1 main_teacher.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag swin --pretrained output/simmim_finetune/swin_base_patch4_window7_224_22k.pth
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_teacher.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag swin --pretrained GFM-main/output/simmim_finetune/swin_base_patch4_window7_224_22k.pth
 ```
 
 ### Testing
@@ -68,7 +69,7 @@ IN_CHANS: 3
 
 Test the model with this line:
 ```
-python -m torch.distributed.launch --nproc_per_node 1 main_testing.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm_aerial_testing --pretrained output/simmim_finetune/gfm.pth --resume PATH_TO_BEST_CHECKPOINT 
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_testing.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm_aerial_testing --pretrained GFM-main/output/simmim_finetune/gfm.pth --resume PATH_TO_BEST_CHECKPOINT 
 ```
 If you want to save the reconstructed images in an lmdb file, add a path to the OUTPUT_LMDB variable of your yaml file.
 
