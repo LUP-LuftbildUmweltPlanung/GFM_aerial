@@ -16,13 +16,11 @@ import torch.distributed as dist
 from timm.utils import AverageMeter
 
 import pandas as pd
-import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 from mlflow_config import *
 
 from config import get_config
-# from models import build_model
 from models.teacher import build_simmim
 from data import build_loader
 from lr_scheduler import build_scheduler
@@ -52,7 +50,7 @@ def setup_mlflow_function():
     client = MlflowClient()
 
     # Define Experiment Name
-    experiment_name = "GFMaerial_swin_teacher"
+    experiment_name = "GFMaerial_testing_test"
 
     # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
@@ -251,6 +249,10 @@ def main(config):
 
     logger.info('Training time {}'.format(total_time_str))
 
+def train_on_image_extract(model, x_rgbi, mask, new_size=192):
+    x_patch = x_rgbi[:,:,:new_size, :new_size]
+    loss, recon_loss, dist_loss = model(x_patch, mask)
+    return loss, recon_loss, dist_loss
 
 def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
     model.train()
@@ -293,7 +295,8 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        loss, reconstruction_loss, distillation_loss = model(img, mask)
+        #loss, reconstruction_loss, distillation_loss = model(img, mask)
+        loss, reconstruction_loss, distillation_loss = train_on_image_extract(model, img, mask, new_size=config.DATA.IMG_SIZE)
 
         loss_meter.update(loss.item(), img.size(0))
         recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
@@ -419,7 +422,8 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        loss, reconstruction_loss, distillation_loss = model(img, mask)
+        #loss, reconstruction_loss, distillation_loss = model(img, mask)
+        loss, reconstruction_loss, distillation_loss = train_on_image_extract(model, img, mask, new_size=config.DATA.IMG_SIZE)
 
         torch.cuda.synchronize()
 

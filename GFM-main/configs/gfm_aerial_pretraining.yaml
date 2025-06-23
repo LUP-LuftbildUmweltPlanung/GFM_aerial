@@ -9,6 +9,7 @@ MODEL:
     WINDOW_SIZE: 6
     TEACHER_WINDOW_SIZE: 6 #for gfm, 7 for swin
     IN_CHANS: 4 #for gfmaerial, 3 for gfm
+    IN_CHANS_TEACHER: 3
 DATA:
   IMG_SIZE: 192 #size of the encoder, not the data
   TEACHER_IMG_SIZE: 192 #for gfm, 224 for swin

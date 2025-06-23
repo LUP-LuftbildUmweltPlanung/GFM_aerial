@@ -178,7 +178,7 @@ def build_simmim(config, logger):
         encoder = SwinTransformerForSimMIM(
             img_size=config.DATA.IMG_SIZE,
             patch_size=config.MODEL.SWIN.PATCH_SIZE,
-            in_chans=4, # New! original: config.MODEL.SWIN.IN_CHANS,
+            in_chans=config.MODEL.SWIN.IN_CHANS,
             num_classes=0,
             embed_dim=config.MODEL.SWIN.EMBED_DIM,
             depths=config.MODEL.SWIN.DEPTHS,
@@ -216,14 +216,14 @@ def build_simmim(config, logger):
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
     teacher = SwinTeacher(
-        img_size=config.DATA.TEACHER_IMG_SIZE, #config.DATA.IMG_SIZE,
+        img_size=config.DATA.TEACHER_IMG_SIZE,
         patch_size=config.MODEL.SWIN.PATCH_SIZE,
-        in_chans=config.MODEL.SWIN.IN_CHANS,
-        num_classes= 0, #config.MODEL.NUM_CLASSES, #0,  # no classification head
+        in_chans=config.MODEL.SWIN.IN_CHANS_TEACHER,
+        num_classes= 0,
         embed_dim=config.MODEL.SWIN.EMBED_DIM,
         depths=config.MODEL.SWIN.DEPTHS,
         num_heads=config.MODEL.SWIN.NUM_HEADS,
-        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE, #config.MODEL.SWIN.WINDOW_SIZE, #7
+        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
         mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
         qkv_bias=config.MODEL.SWIN.QKV_BIAS,
         qk_scale=config.MODEL.SWIN.QK_SCALE,
@@ -287,7 +287,7 @@ class SimMIM_testing2(nn.Module):
         self.cos = nn.CosineSimilarity(dim=1)
 
     def forward(self, x, mask):
-        ################## NEW: x for encoder with RGBI, x for teacher with RGB ######################
+        ################## New: x for encoder with RGBI, x_rgb for teacher with RGB ######################
 
 
         if self.in_chans == 4:
@@ -391,9 +391,9 @@ def build_simmim_testing2(config, logger):
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
     teacher = SwinTeacher(
-        img_size=config.DATA.TEACHER_IMG_SIZE, #config.DATA.IMG_SIZE,
+        img_size=config.DATA.TEACHER_IMG_SIZE,
         patch_size=config.MODEL.SWIN.PATCH_SIZE,
-        in_chans=3,
+        in_chans=config.MODEL.SWIN.IN_CHANS_TEACHER,
         num_classes= 0,
         embed_dim=config.MODEL.SWIN.EMBED_DIM,
         depths=config.MODEL.SWIN.DEPTHS,

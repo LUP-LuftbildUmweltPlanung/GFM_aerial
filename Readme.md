@@ -41,6 +41,12 @@ Run pretraining with this line:
 python -m torch.distributed.launch --nproc_per_node 1 main_teacher.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm --pretrained output/simmim_finetune/gfm.pth
 ```
 
+Test the resulting model with this line:
+```
+python -m torch.distributed.launch --nproc_per_node 1 main_testing.py --cfg configs/gfm_aerial_testing.yaml --batch-size 32 --tag gfm_aerial_testing --pretrained output/simmim_finetune/gfm.pth --resume PATH_TO_BEST_CHECKPOINT 
+```
+If you want to save the reconstructed images in an lmdb file, add a path to the OUTPUT_LMDB variable in your yaml file.
+
 ### Executing pretraining - Swin teacher
 If you want to train with the Swin-transformer as teacher, execute this code:
 ```
@@ -58,6 +64,15 @@ Run pretraining with this line:
 ```
 python -m torch.distributed.launch --nproc_per_node 1 main_teacher.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag swin --pretrained output/simmim_finetune/swin_base_patch4_window7_224_22k.pth
 ```
+
+###Testing
+Make sure to use the same variables of teacher and student that were used during training.
+
+Test the model with this line:
+```
+python -m torch.distributed.launch --nproc_per_node 1 main_testing.py --cfg configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm_aerial_testing --pretrained output/simmim_finetune/gfm.pth --resume PATH_TO_BEST_CHECKPOINT 
+```
+If you want to save the reconstructed images in an lmdb file, add a path to the OUTPUT_LMDB variable of your yaml file.
 
 ## Authors
 
