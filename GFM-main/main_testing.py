@@ -277,7 +277,7 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
             x_patch = x_rgbi[:, :, i:i + patch_size, j:j + patch_size]
             mask_patch = mask
 
-            if output_lmdb: #TODO
+            if output_lmdb:
                 rgbi_losses, rgb_losses, x_reconstructed = model(x_patch, mask_patch)
 
                 #### visualize mask:
