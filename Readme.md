@@ -1,6 +1,6 @@
 # GFM-aerial
 
-Adaptation of the [GFM](https://github.com/mmendiet/GFM) by Mendieta et al. to German aerial images in RGBI format. 
+Adaptation of the [GFM](https://github.com/mmendiet/GFM) by Mendieta et al. (2023) to German aerial images in RGBI format. 
 
 ## Model structure
 <img src="img/Model_structure.png"/>
