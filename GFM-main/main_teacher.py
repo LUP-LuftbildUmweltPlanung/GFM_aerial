@@ -223,7 +223,7 @@ def main(config):
             else:
                 save_checkpoint(config, epoch, model_without_ddp, 0, optimizer, lr_scheduler, logger, train_loss, avg_val_loss, new_best_key=False)
 
-
+        # Save statistics to csv files
         if dist.get_rank() == 0:
             curr_log_loss = [epoch, train_loss, avg_val_loss, val_loss_temp_ind, val_loss_spa_ind,
                                 val_loss_temp_spa_ind]
@@ -244,17 +244,40 @@ def main(config):
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+
+    # Save statistics to MLflow
     if dist.get_rank() == 0:
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Training time {}'.format(total_time_str))
 
 def train_on_image_extract(model, x_rgbi, mask, new_size=192):
-    x_patch = x_rgbi[:,:,:new_size, :new_size]
-    loss, recon_loss, dist_loss = model(x_patch, mask)
-    return loss, recon_loss, dist_loss
+    """
+    One epoch of training is performed on the first patch of size new_size:new_size of the original images.
+
+    Parameters:
+        model (object): the model that is being trained
+        x_rgbi (tensor): the original image as given by the dataloader
+        mask (tensor): the generated mask, shape is calculated depending on the encoder parameters, not the data
+        new_size (int): new size of images
+
+    Returns:
+        loss (float): combined loss, recon_loss + dist_loss
+        recon_loss (float): reconstruction loss of the model
+        dist_loss (float): distillation loss of the model
+
+    """
+    if x_rgbi.size(2) >= new_size:
+        x_patch = x_rgbi[:,:,:new_size, :new_size]
+        loss, recon_loss, dist_loss = model(x_patch, mask)
+        return loss, recon_loss, dist_loss
+    else:
+        raise NotImplementedError
 
 def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
+    """
+    Perform one epoch of training.
+    """
     model.train()
     optimizer.zero_grad()
 
@@ -275,7 +298,6 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
                     "batch_time_avg",
                     "batch_time_val",
                     "memory_used",
-                    # "eta",
                     "grad_norm_avg",
                     "grad_norm_val",
                     "learning_rate",
@@ -287,21 +309,17 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
     for idx, batch in enumerate(data_loader):
 
-        #if config.DATA.DATA_TRAIN_PATH.endswith(".lmdb"):
-        #    img, mask = batch
-        #else:
         img, mask, _ = batch
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        #loss, reconstruction_loss, distillation_loss = model(img, mask)
+        # train on image extract of size config.DATA.IMG_SIZE and return the loss values
         loss, reconstruction_loss, distillation_loss = train_on_image_extract(model, img, mask, new_size=config.DATA.IMG_SIZE)
 
         loss_meter.update(loss.item(), img.size(0))
         recon_loss_meter.update(reconstruction_loss.item(), img.size(0))
         dist_loss_meter.update(distillation_loss.item(), img.size(0))
-
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
             loss = loss / config.TRAIN.ACCUMULATION_STEPS
@@ -364,6 +382,7 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
     epoch_time = time.time() - start
 
+    # Save statistics to csv
     curr_list = [epoch,
                  loss_meter.avg,
                  loss_meter.val,
@@ -388,7 +407,20 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
 
 @torch.no_grad()
-def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key="spa_ind"):
+def validate_one_epoch(config, model, data_loader, epoch, val_key="spa_ind"):
+    """
+    Validate the model after training one epoch on one validation dataset.
+
+    Parameters:
+        config : frozen configuration parameters
+        model : model that is being trained
+        data_loader (dataloader): the dataset used for validation
+        epoch : current epoch counter, for statistics and logging
+        val_key (string): type of validation dataset ["temp_ind", "spa_ind", "temp_spa_ind"]
+
+    Returns:
+        loss_meter.avg (float): the average combined loss value
+    """
     model.eval()
 
     batch_time = AverageMeter()
@@ -414,15 +446,12 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
     num_steps = len(data_loader)
 
     for idx, batch in enumerate(data_loader):
-        #if lmdb_key:
-        #    img, mask = batch
-        #else:
         img, mask, _ = batch
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
 
-        #loss, reconstruction_loss, distillation_loss = model(img, mask)
+        # Validate on image extract of size config.DATA.IMG_SIZE
         loss, reconstruction_loss, distillation_loss = train_on_image_extract(model, img, mask, new_size=config.DATA.IMG_SIZE)
 
         torch.cuda.synchronize()
@@ -445,6 +474,8 @@ def validate_one_epoch(config, model, data_loader, epoch, lmdb_key=True, val_key
 
     epoch_end = time.time()
     epoch_time = epoch_end - start
+
+    # save statistics to csv
     curr_list = [epoch,
                  loss_meter.avg,
                  loss_meter.val,
@@ -520,8 +551,6 @@ if __name__ == '__main__':
 
     # print config
     #logger.info(config.dump())
-
-    #logger.info("Train dataset: ", config.DATA.DATA_TRAIN_PATH)
 
     main(config)
 

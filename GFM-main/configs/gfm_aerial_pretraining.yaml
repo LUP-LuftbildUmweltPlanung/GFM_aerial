@@ -13,13 +13,13 @@ MODEL:
 DATA:
   IMG_SIZE: 192 #size of the encoder, not the data
   TEACHER_IMG_SIZE: 192 #for gfm, 224 for swin
-  MASK_PATCH_SIZE: 32
-  MASK_RATIO: 0.6
+  MASK_PATCH_SIZE: 32 #number of masked-out areas per image
+  MASK_RATIO: 0.6 #masked % of image range [0,1]
   DATA_TRAIN_PATH: "PATH"
   DATA_VALI_PATH_TEMP_IND: "PATH"
   DATA_VALI_PATH_SPA_IND: "PATH"
   DATA_VALI_PATH_TEMP_SPA_IND: "PATH"
-  OUTPUT_LMDB: None
+  OUTPUT_LMDB: None #save reconstructed images when testing
 TRAIN:
   EPOCHS: 100
   WARMUP_EPOCHS: 10
@@ -27,6 +27,6 @@ TRAIN:
   WARMUP_LR: 1e-6
   MIN_LR: 1e-5
   WEIGHT_DECAY: 0.05
-PRINT_FREQ: 100
-SAVE_FREQ: 5
+PRINT_FREQ: 100 #print stats after that many batches
+SAVE_FREQ: 5 #save checkpoint at least after that many epochs. If model improved checkpoint is saved either way
 TAG: gfm_aerial_pretrain
