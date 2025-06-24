@@ -119,15 +119,12 @@ class SimMIM(nn.Module):
             nn.PixelShuffle(self.encoder_stride),
         )
 
-        #New: projects RGBI-embedding to RGB
-        #self.linear_proj_rgb = nn.Linear(self.encoder.num_features, self.encoder.num_features)
-
         self.projector = nn.Linear(self.encoder.num_features, self.encoder.num_features)
         self.cos = nn.CosineSimilarity(dim=1)
 
 
     def forward(self, x, mask):
-        ################## NEW: x for encoder with RGBI, x for teacher with RGB ######################
+        ################## NEW: x for encoder with RGBI, x_rgb for teacher with RGB ######################
 
         # Encoder uses RGBI input
         r, zs_full = self.encoder(x, mask)
@@ -263,8 +260,14 @@ class SwinTeacher(SwinTransformer):
         x = self.forward_features(x)
         return x
 
-class SimMIM_testing2(nn.Module):
+class SimMIM_testing(nn.Module):
+    """
+    Class to test models with RGB or RGBI encoders.
+    """
     def __init__(self, encoder, encoder_stride, teacher):
+        """
+        Initialization of SimMIM_testing2 class
+        """
         super().__init__()
         self.encoder = encoder
         self.encoder_stride = encoder_stride
@@ -289,7 +292,6 @@ class SimMIM_testing2(nn.Module):
     def forward(self, x, mask):
         ################## New: x for encoder with RGBI, x_rgb for teacher with RGB ######################
 
-
         if self.in_chans == 4:
             # Encoder uses RGBI input
             r, _ = self.encoder(x, mask)
@@ -301,33 +303,36 @@ class SimMIM_testing2(nn.Module):
             # reconstructed RGBI image
             x_rec = self.decoder(r)
 
+            # use parts of reconstructed RGBI image for RGB and near-infrared calculations
             x_rec_rgb = x_rec[:, :3]
             x_rec_i = x_rec[:,3]
 
         else:
             # Teacher only uses RGB bands
             x_rgb = x[:, :3]
-            # Encoder uses RGBI input
+            # Encoder uses RGB input
             r, _ = self.encoder(x_rgb, mask)
-            # reconstructed RGBI image
+            # reconstructed RGB image
             x_rec_rgb = self.decoder(r)
             x_rec = x_rec_rgb
 
             rgbi_losses = None
 
-
+        # scale mask to image size
         mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
             1).contiguous()
         mask_i = mask.squeeze(1)
 
+        # RGBI and infrared losses can only be calculated if images include the near-infrared channel which we assume is only present with 4 channels for simplicity's sake
         if self.in_chans == 4:
-            # L1-Loss for reconstruction
+            # Losses for RGBI channels
             l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
-            l1_recon_loss = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4
+            l1_recon_loss = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4 #divide by number of channels
 
             l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
-            l2_recon_loss = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4
+            l2_recon_loss = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4 #divide by number of channels
 
+            # Losses for near-infrared channel
             l1_loss_recon_i = F.l1_loss(x_i, x_rec_i, reduction='none')
             l1_recon_loss_i = (l1_loss_recon_i * mask_i).sum() / (mask_i.sum() + 1e-5)
 
@@ -336,18 +341,21 @@ class SimMIM_testing2(nn.Module):
 
             rgbi_losses = [l1_recon_loss, l2_recon_loss, l1_recon_loss_i, l2_recon_loss_i]
 
-
+        # Losses for RGB channels can always be calculated because all implemented models have learned at least on RGB images
         l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
-        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3
+        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3 #divide by number of channels
 
         l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
-        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3
+        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3 #divide by number of channels
 
         return rgbi_losses, [l1_recon_loss_rgb, l2_recon_loss_rgb], x_rec
 
 
 
-def build_simmim_testing2(config, logger):
+def build_simmim_testing(config, logger):
+    """
+    Builds a SimMIM module with encoder and teacher for testing and uses the SimMIM_testing2 class.
+    """
     model_type = config.MODEL.TYPE
     if model_type == 'swin':
         encoder = SwinTransformerForSimMIM(
@@ -410,7 +418,7 @@ def build_simmim_testing2(config, logger):
         alpha=config.ALPHA
     )
     load_pretrained(config, teacher, logger)
-    model = SimMIM_testing2(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
+    model = SimMIM_testing(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
 
     return model
 

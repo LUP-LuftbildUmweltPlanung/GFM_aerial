@@ -6,19 +6,23 @@ def save_bands_to_safetensor(bands_dict):
     """
     Writes all bands in a dictionary to safetensor format.
 
-    :param bands_dict: Dictionary {Bandname: NumPy-Array}
-    :return: Bytes object as safetensor
+    Parameters:
+        bands_dict (dict): Dictionary {Bandname: NumPy-Array}
+
+    Return:
+        safetensor
     """
     return save(bands_dict)
 
 
 def write_to_lmdb(db, key, safetensor_data):
     """
-    Writes a multidimensional safetensor into an lmdb. Map-size is adapted automatically
+    Writes a multidimensional safetensor into an lmdb. Map-size is adapted automatically.
 
-    :param db: LMDB
-    :param key: Key for the safetensor
-    :param bands_dict: Dictionary with {Bandname: NumPy-Array}
+    Parameters:
+        db (lmdb object): LMDB
+        key (string): Key for the safetensor
+        bands_dict (savetensor): Dictionary with {Bandname: NumPy-Array}
     """
     success = False
 
@@ -40,9 +44,12 @@ def create_or_open_lmdb(lmdb_path, size=None):
     """
     Creates a new lmdb database or opens an existing one
 
-    :param lmdb_path: path to the lmdb
-    :param size: maximal storage size in bytes (optional)
-    :return: lmdb environment
+    Parameters:
+        lmdb_path (string): path to the lmdb
+        size (int): maximal storage size in bytes (optional)
+
+    Returns:
+        lmdb-object
     """
     if os.path.exists(lmdb_path):
         print(f"Open existing LMDB: {lmdb_path}")

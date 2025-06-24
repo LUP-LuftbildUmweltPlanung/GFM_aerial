@@ -112,6 +112,9 @@ class SimMIMTransform:
         )
 
     def ensure_four_channels_tensor(self, img):
+        """
+        Ensures that images of lmdb datasets have four channels.
+        """
         if isinstance(img, torch.Tensor):
             if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
                 alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
@@ -144,10 +147,13 @@ def collate_fn(batch):
 
 class LMDBSafetensorDataset(Dataset):
     """
-    LMDB Dataset for loading data from lmdb instead of tiff files.
+    Class for loading data from lmdb instead of tiff files.
     """
 
     def __init__(self, lmdb_path, transform=None):
+        """
+        Constructs an LMDBSafetensorDataset object.
+        """
         self.lmdb_path = lmdb_path
         self.transform = transform
         self.env = lmdb.open(lmdb_path, readonly=True, lock=False)
@@ -156,9 +162,19 @@ class LMDBSafetensorDataset(Dataset):
             self.keys = [key.decode() for key, _ in txn.cursor()]
 
     def __len__(self):
+        """
+        Function to get the number of items in the dataset.
+        """
         return len(self.keys)
 
     def __getitem__(self, index):
+        """
+        Funktion to get a specific item of the dataset.
+
+        Returns:
+            tensor (tensor): A tensor stacked image channels
+            key (byte): The encoded key of the dataset entry as saved in the lmdb file
+        """
         key = self.keys[index]
         with self.env.begin() as txn:
             safetensor_data = txn.get(key.encode())

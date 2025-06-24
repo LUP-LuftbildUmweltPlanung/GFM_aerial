@@ -21,7 +21,7 @@ from mlflow.tracking import MlflowClient
 from mlflow_config import *
 
 from config import get_config
-from models.teacher import build_simmim_testing2
+from models.teacher import build_simmim_testing
 from data import build_loader
 from logger import create_logger
 from utils import write_epoch_to_csv
@@ -161,6 +161,14 @@ def parse_option():
 
 
 def load_model_testing(config, model, logger):
+    """
+    Load the state_dict of a model for testing.
+
+    Parameters:
+        config : frozen config file
+        model : the initialized model that is filled with the state_dict
+        logger : logging object
+    """
     logger.info(f">>>>>>>>>> Resuming from {config.MODEL.RESUME} ..........")
     if config.MODEL.RESUME.startswith('https'):
         checkpoint = torch.hub.load_state_dict_from_url(
@@ -180,9 +188,8 @@ def main(config):
     data_loader_vali_temp_spa_ind = build_loader(config, logger, is_pretrain=True, is_train=False, vali_key=2)
 
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
-    model = build_simmim_testing2(config, logger)
+    model = build_simmim_testing(config, logger)
     model.cuda()
-    #logger.info(str(model))
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
     model_without_ddp = model.module
 
@@ -193,9 +200,12 @@ def main(config):
 
     loss_log_header = ["avg_l1_rgbi", "avg_l2_rgbi", "avg_l1_infrared", "avg_l2_infrared", "avg_l1_rgb", "avg_l2_rgb"]
 
+    # Test once on all test datasets
     l1_rgbi_temp_ind, l2_rgbi_temp_ind, l1_i_temp_ind, l2_i_temp_ind, l1_rgb_temp_ind, l2_rgb_temp_ind = test_generalization(config, model, data_loader_vali_temp_ind, test_key="temp_ind")
     l1_rgbi_spa_ind, l2_rgbi_spa_ind, l1_i_spa_ind, l2_i_spa_ind, l1_rgb_spa_ind, l2_rgb_spa_ind = test_generalization(config, model, data_loader_vali_spa_ind, test_key="spa_ind")
     l1_rgbi_temp_spa_ind, l2_rgbi_temp_spa_ind, l1_i_temp_spa_ind, l2_i_temp_spa_ind, l1_rgb_temp_spa_ind, l2_rgb_temp_spa_ind = test_generalization(config, model, data_loader_vali_temp_spa_ind, test_key="temp_spa_ind")
+
+    # Average losses
     avg_l1_rgbi = (l1_rgbi_temp_ind + l1_rgbi_spa_ind+l1_rgbi_temp_spa_ind)/3
     avg_l2_rgbi = (l2_rgbi_temp_ind + l2_rgbi_spa_ind+l2_rgbi_temp_spa_ind)/3
     avg_l1_i = (l1_i_temp_ind + l1_i_spa_ind + l1_i_temp_spa_ind) / 3
@@ -205,20 +215,32 @@ def main(config):
 
     avg_log_loss = [avg_l1_rgbi, avg_l2_rgbi, avg_l1_i, avg_l2_i, avg_l1_rgb, avg_l2_rgb]
 
+    # save statistics to csv
     write_epoch_to_csv(os.path.join(config.OUTPUT_STATS, "avg_test_loss_log_table.csv"), avg_log_loss, loss_log_header)
 
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 
+    # save statistics to MLflow
     if dist.get_rank() == 0:
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Testing time {}'.format(total_time_str))
 
 def inverse_normalize(x):
-    #mean: (0.485, 0.456, 0.406, 0.5947974324226379)
-    #std: (0.229, 0.224, 0.225, 0.19213160872459412)
+    """
+    Undo the normalization for visualization of reconstructed images.
+
+    mean of normalization: (0.485, 0.456, 0.406, 0.5947974324226379)
+    std of normalization: (0.229, 0.224, 0.225, 0.19213160872459412)
+
+    Parameters:
+        x (tensor): reconstructed image
+
+    Returns:
+        image as tensor with pixel values in [0,255] interval
+    """
 
     if x.size(0)==4:
         inv_norm = T.Compose([T.Normalize(mean=[0., 0., 0., 0.], std=[1/0.229, 1/0.224, 1/0.225, 1/0.19213160872459412]),
@@ -234,6 +256,14 @@ def inverse_normalize(x):
     return inv_norm(x)
 
 def save_in_lmdb(db, x_reconstructed, key):
+    """
+    Saves a reconstructed image in lmdb format with the key of the original lmdb file.
+
+    Parameters:
+        db (lmdb object): lmdb file
+        x_reconstructed (tensor): reconstructed image, normalized pixel values
+        key (bytestring): key from original lmdb file
+    """
 
     for i in range(len(key)):
         # img shape: (B, 4, H, W)
@@ -255,6 +285,21 @@ def save_in_lmdb(db, x_reconstructed, key):
 
 
 def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
+    """
+    If the input image does not match the encoder image size, the model is applied patch wise and the result is merged.
+
+    Parameters:
+        config : frozen configuration parameters
+        model: model that is being tested
+        x_rgbi (tensor): input test image in RGBI format
+        mask (tensor): generated mask, depends on encoder parameters, not data
+        key (tensor): keys from lmdb file for all images
+        output_lmdb (string, None): Path to output lmdb file where reconstructed images will be safed
+
+    Returns:
+        avg_rgbi_loss (list): average reconstruction loss on RGBI channels [
+        avg_rgb_loss (list): average reconstruction loss on RGB channels
+    """
     patch_size = config.DATA.IMG_SIZE
 
     B, C, H, W = x_rgbi.shape
@@ -318,6 +363,25 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
 
 @torch.no_grad()
 def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa_ind"):
+    """
+    Perform testing once on all images in one test dataset. Similar to validate_one_epoch.
+
+    Parameters:
+        config : frozen configuration parameters
+        model : model that is being trained
+        data_loader (dataloader): the dataset used for validation
+        lmdb_key (bool): True if data comes in lmdb format
+        test_key (string): defines type of testing dataset ["temp_ind", "spa_ind", "temp_spa_ind"]
+
+    Returns:
+        l1_recon_loss_rgbi_meter.avg (float): Average L1 loss over RGBI channels
+        l2_recon_loss_rgbi_meter.avg (float): Average L2 loss over RGBI channels
+        l1_recon_loss_infrared_meter.avg (float): Average L1 loss over the near-infrared channel
+        l2_recon_loss_infrared_meter.avg (float): Average L2 loss over the near-infrared channel
+        l1_recon_loss_rgb_meter.avg (float): Average L1 loss over RGB channels
+        l2_recon_loss_rgb_meter.avg (float): Average L2 loss over RGB channels
+
+    """
     model.eval()
 
     batch_time = AverageMeter()
@@ -363,6 +427,7 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
 
         torch.cuda.synchronize()
 
+        # RGBI and infrared losses can only be calculated if images include the near-infrared channel which we assume is only present with 4 channels for simplicity's sake
         if config.MODEL.SWIN.IN_CHANS == 4:
             l1_recon_loss_rgbi_meter.update(losses_rgbi[0], img.size(0))
             l2_recon_loss_rgbi_meter.update(losses_rgbi[1], img.size(0))
