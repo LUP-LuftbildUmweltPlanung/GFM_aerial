@@ -7,6 +7,8 @@
 
 import math
 import random
+import warnings
+
 import numpy as np
 
 import torch
@@ -65,7 +67,7 @@ class SimMIMTransform:
                 self.transform_img = bend.build_transform(config, split='train')
             elif data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels(img)),
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
                     T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
@@ -80,16 +82,20 @@ class SimMIMTransform:
                     T.ToTensor(),
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
+            else:
+                raise NotImplementedError
         else:
             data_path = config.DATA.DATA_VALI_PATH[vali_key]
 
             if data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels(img)),
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
                     T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
+            else:
+                raise NotImplementedError
  
         if config.MODEL.TYPE == 'swin':
             model_patch_size=config.MODEL.SWIN.PATCH_SIZE
@@ -105,11 +111,13 @@ class SimMIMTransform:
             mask_ratio=config.DATA.MASK_RATIO,
         )
 
-    def ensure_four_channels(self, img):
+    def ensure_four_channels_tensor(self, img):
         if isinstance(img, torch.Tensor):
             if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
                 alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
                 img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
+        else:
+            raise NotImplementedError
         return img
 
     def __call__(self, img):
@@ -171,7 +179,7 @@ class LMDBSafetensorDataset(Dataset):
 
         tensor = torch.from_numpy(stacked_array).float()
 
-        if self.transform:
+        if self.transform is not None:
             tensor = self.transform(tensor)
 
         return tensor, key
