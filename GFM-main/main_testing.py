@@ -1,5 +1,5 @@
 # --------------------------------------------------------
-# Based from SimMIM codebase
+# Based on SimMIM codebase
 # https://github.com/microsoft/SimMIM
 # --------------------------------------------------------
 
@@ -303,7 +303,8 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
     patch_size = config.DATA.IMG_SIZE
 
     B, C, H, W = x_rgbi.shape
-    assert H % patch_size == 0 and W % patch_size == 0, "Image must be divisible by patch size"
+    if H % patch_size != 0 or W % patch_size != 0:
+        raise Exception("Image must be divisible by patch size")
     patch_count = 0
 
     rgbi_total = [0.0,0.0,0.0,0.0]
@@ -314,9 +315,6 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
     if output_lmdb:
         aggregated_x_rec = torch.zeros(x_rgbi.shape)
 
-        #### visualize mask:
-        #aggregated_mask = torch.zeros(x_rgbi.shape)
-
     for i in range(0, H, patch_size):
         for j in range(0, W, patch_size):
             x_patch = x_rgbi[:, :, i:i + patch_size, j:j + patch_size]
@@ -325,13 +323,8 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
             if output_lmdb:
                 rgbi_losses, rgb_losses, x_reconstructed = model(x_patch, mask_patch)
 
-                #### visualize mask:
-                #rgbi_losses, rgb_losses, fullmask = model(x_patch, mask_patch)
-
                 aggregated_x_rec[:,:config.MODEL.SWIN.IN_CHANS,i:i+patch_size, j:j + patch_size] = x_reconstructed
 
-                #### visualize mask:
-                #aggregated_mask[:,0,i:i+patch_size, j:j + patch_size] = fullmask.squeeze()
             else:
                 rgbi_losses, rgb_losses, _ = model(x_patch, mask_patch)
 
@@ -347,9 +340,6 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
     if output_lmdb:
         db = create_or_open_lmdb(output_lmdb)
         save_in_lmdb(db, aggregated_x_rec, key)
-
-        #### visualize mask:
-        #save_in_lmdb(db, aggregated_mask, key)
 
     if config.MODEL.SWIN.IN_CHANS == 4:
         avg_rgbi_loss.append(rgbi_total[0] / patch_count)
@@ -487,7 +477,8 @@ if __name__ == '__main__':
 
 
     if config.AMP_OPT_LEVEL != "O0":
-        assert amp is not None, "amp not installed!"
+        if amp is None:
+            raise Exception("amp not installed!")
 
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         rank = int(os.environ["RANK"])
