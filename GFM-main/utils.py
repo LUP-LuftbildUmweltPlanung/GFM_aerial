@@ -73,7 +73,6 @@ def write_epoch_to_csv(file_path, data, header=None):
 
     with open(file_path, mode='a', newline='') as f:
         writer = csv.writer(f)
-        # Wenn die Datei neu ist, Header schreiben
         if not file_exists and header is not None:
             writer.writerow(header)
         writer.writerow(data)

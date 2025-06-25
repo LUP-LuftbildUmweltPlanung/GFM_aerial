@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="gfm" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="gfm" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="/opt/miniconda3/envs/gfm-aerial" project-jdk-type="Python SDK" />
 </project>
