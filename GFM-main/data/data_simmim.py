@@ -7,6 +7,8 @@
 
 import math
 import random
+import warnings
+
 import numpy as np
 
 import torch
@@ -65,7 +67,7 @@ class SimMIMTransform:
                 self.transform_img = bend.build_transform(config, split='train')
             elif data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels(img)),
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
                     T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
@@ -80,16 +82,20 @@ class SimMIMTransform:
                     T.ToTensor(),
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
+            else:
+                raise NotImplementedError
         else:
             data_path = config.DATA.DATA_VALI_PATH[vali_key]
 
             if data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels(img)),
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
                     T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
+            else:
+                raise NotImplementedError
  
         if config.MODEL.TYPE == 'swin':
             model_patch_size=config.MODEL.SWIN.PATCH_SIZE
@@ -105,51 +111,16 @@ class SimMIMTransform:
             mask_ratio=config.DATA.MASK_RATIO,
         )
 
-    """def __init__(self, config):
-        if 'bigearthnet' in config.DATA.DATA_PATH:
-            self.transform_img = bend.build_transform(config, split='train')
-        elif config.DATA.DATA_PATH.endswith(".lmdb"):
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: self.ensure_four_channels(img)),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img),
-                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
-            ])
-        elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.ToTensor(),
-                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]),
-                            std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
-            ])
-
-        if config.MODEL.TYPE == 'swin':
-            model_patch_size = config.MODEL.SWIN.PATCH_SIZE
-        elif config.MODEL.TYPE == 'vit':
-            model_patch_size = config.MODEL.VIT.PATCH_SIZE
-        else:
-            raise NotImplementedError
-
-        self.mask_generator = MaskGenerator(
-            input_size=config.DATA.IMG_SIZE,
-            mask_patch_size=config.DATA.MASK_PATCH_SIZE,
-            model_patch_size=model_patch_size,
-            mask_ratio=config.DATA.MASK_RATIO,
-        )
-    """
-
-    def ensure_four_channels(self, img):
+    def ensure_four_channels_tensor(self, img):
         """
-        Stellt sicher, dass der Tensor 4 Kanäle hat. Falls das Bild nur 3 Kanäle hat, wird ein zusätzlicher Alpha-Kanal (0.5) hinzugefügt.
+        Ensures that images of lmdb datasets have four channels.
         """
         if isinstance(img, torch.Tensor):
-            if img.shape[0] == 3:  # Falls nur 3 Kanäle vorhanden sind (C, H, W)
+            if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
                 alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
-                img = torch.cat([img, alpha_channel], dim=0)  # Fügt den vierten Kanal hinzu (RGBA)
+                img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
+        else:
+            raise NotImplementedError
         return img
 
     def __call__(self, img):
@@ -176,33 +147,41 @@ def collate_fn(batch):
 
 class LMDBSafetensorDataset(Dataset):
     """
-    LMDB Dataset für das Laden von Safetensors direkt als Dictionary.
+    Class for loading data from lmdb instead of tiff files.
     """
 
     def __init__(self, lmdb_path, transform=None):
+        """
+        Constructs an LMDBSafetensorDataset object.
+        """
         self.lmdb_path = lmdb_path
         self.transform = transform
         self.env = lmdb.open(lmdb_path, readonly=True, lock=False)
 
-        # Alle Keys abrufen
         with self.env.begin() as txn:
             self.keys = [key.decode() for key, _ in txn.cursor()]
 
     def __len__(self):
+        """
+        Function to get the number of items in the dataset.
+        """
         return len(self.keys)
 
     def __getitem__(self, index):
         """
-        Lädt ein komplettes Safetensor-Dictionary aus LMDB.
+        Funktion to get a specific item of the dataset.
+
+        Returns:
+            tensor (tensor): A tensor stacked image channels
+            key (byte): The encoded key of the dataset entry as saved in the lmdb file
         """
         key = self.keys[index]
         with self.env.begin() as txn:
             safetensor_data = txn.get(key.encode())
 
         if safetensor_data is None:
-            raise KeyError(f"❌ Kein Eintrag für '{key}' gefunden in LMDB!")
+            raise KeyError(f"No entry for '{key}' was found in the lmdb!")
 
-        # Safetensor direkt als Dictionary zurückgeben
         bands_dict = load(safetensor_data)
 
         self.selected_bands = sorted(list(bands_dict.keys()))
@@ -210,34 +189,30 @@ class LMDBSafetensorDataset(Dataset):
         band_arrays = [bands_dict[b] for b in self.selected_bands if b in bands_dict]
 
         if len(band_arrays) == 0:
-            raise ValueError(f"❌ Keine gültigen Bänder in '{key}' gefunden!")
+            raise ValueError(f"No band entries found for '{key}'!")
 
         stacked_array = np.stack(band_arrays)  # Shape: (C, H, W)
 
-        # In PyTorch-Tensor umwandeln
         tensor = torch.from_numpy(stacked_array).float()
 
-        # Transformation anwenden (falls vorhanden)
-        if self.transform:
+        if self.transform is not None:
             tensor = self.transform(tensor)
 
-        return tensor
+        return tensor, key
 
 def build_loader_simmim(config, logger, is_train=True, vali_key=None):
-    # 1. Wähle richtigen Datenpfad
     if is_train:
         data_path = config.DATA.DATA_TRAIN_PATH
+        logger.info(f"Train data path: {data_path}")
     else:
         data_path = config.DATA.DATA_VALI_PATH[vali_key]
-    logger.info(f"Train data path: {data_path}")
+        logger.info(f"Vali data path: {data_path}")
 
-    # 2. Transformation aufbauen
     transform = SimMIMTransform(config, is_train, vali_key)
     logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
 
-    # 3. Dataset laden
     if data_path.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
+        logger.info(f"Load LMDB: {data_path}")
         dataset = LMDBSafetensorDataset(data_path, transform)
     elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
         datasets = []
@@ -247,9 +222,9 @@ def build_loader_simmim(config, logger, is_train=True, vali_key=None):
     else:
         dataset = ImageFolder(data_path, transform)
 
-    logger.info(f'Build dataset: train images = {len(dataset)}')
+    logger.info(f'Build dataset: images = {len(dataset)}')
 
-    # 4. Sampler konfigurieren (Train = shuffle, Val = keine Zufälligkeit)
+    # Sampler: Train = shuffle, Val = no shuffle
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -257,113 +232,17 @@ def build_loader_simmim(config, logger, is_train=True, vali_key=None):
         shuffle=is_train
     )
 
-    # 5. Dataloader erstellen
     dataloader = DataLoader(
         dataset,
         batch_size=config.DATA.BATCH_SIZE,
         sampler=sampler,
         num_workers=config.DATA.NUM_WORKERS,
         pin_memory=True,
-        drop_last=is_train,  # nur beim Training wichtig
+        drop_last=is_train,  # just for training
         collate_fn=collate_fn
     )
 
     return dataloader
-
-def build_loader_vali(config, logger, vali_key=None):
-    # 1. Wähle richtigen Datenpfad
-    data_path = config.DATA.DATA_TRAIN_PATH if is_train else config.DATA.DATA_VALI_PATH[vali_key]
-    logger.info(f"{'Train' if is_train else 'Validation'} data path: {data_path}")
-
-    # 2. Transformation aufbauen
-    transform = SimMIMTransform(config, is_train, vali_key)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    # 3. Dataset laden
-    if data_path.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {data_path}")
-        dataset = LMDBSafetensorDataset(data_path, transform)
-    elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
-        datasets = []
-        for ds in os.listdir(data_path):
-            datasets.append(ImageFolder(os.path.join(data_path, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(data_path, transform)
-
-    logger.info(f'Build dataset: {"train" if is_train else "val"} images = {len(dataset)}')
-
-    # 4. Sampler konfigurieren (Train = shuffle, Val = keine Zufälligkeit)
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=dist.get_world_size(),
-        rank=dist.get_rank(),
-        shuffle=is_train
-    )
-
-    # 5. Dataloader erstellen
-    dataloader = DataLoader(
-        dataset,
-        batch_size=config.DATA.BATCH_SIZE,
-        sampler=sampler,
-        num_workers=config.DATA.NUM_WORKERS,
-        pin_memory=True,
-        drop_last=is_train,  # nur beim Training wichtig
-        collate_fn=collate_fn
-    )
-
-    return dataloader
-
-
-"""
-def build_loader_simmim(config, logger):
-    transform = SimMIMTransform(config)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    if config.DATA.DATA_PATH.endswith(".lmdb"):
-        logger.info(f"⚡ Lade LMDB-Dataset: {config.DATA.DATA_PATH}")
-        dataset = LMDBSafetensorDataset(config.DATA.DATA_PATH, transform)
-    elif 'GeoPileV0' in config.DATA.DATA_PATH and not config.DATA.DATA_PATH.endswith(".lmdb"):
-        datasets = []
-        for ds in os.listdir(config.DATA.DATA_PATH):
-            datasets.append(ImageFolder(os.path.join(config.DATA.DATA_PATH, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(config.DATA.DATA_PATH, transform)
-
-    logger.info(f'Build dataset: train images = {len(dataset)}')
-
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=True)
-    dataloader = DataLoader(dataset, config.DATA.BATCH_SIZE, sampler=sampler, num_workers=config.DATA.NUM_WORKERS,
-                            pin_memory=True, drop_last=True, collate_fn=collate_fn)
-    print(sampler)
-    print(len(dataloader.dataset))
-    # exit()
-    return dataloader
-"""
-
-
-"""def build_loader_simmim(config, logger):
-    transform = SimMIMTransform(config)
-    logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
-
-    if 'GeoPileV0' in config.DATA.DATA_PATH:
-        datasets = []
-        for ds in os.listdir(config.DATA.DATA_PATH):
-            datasets.append(ImageFolder(os.path.join(config.DATA.DATA_PATH, ds), transform))
-        dataset = torch.utils.data.ConcatDataset(datasets)
-    else:
-        dataset = ImageFolder(config.DATA.DATA_PATH, transform)
-
-    logger.info(f'Build dataset: train images = {len(dataset)}')
-    
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=True)
-    dataloader = DataLoader(dataset, config.DATA.BATCH_SIZE, sampler=sampler, num_workers=config.DATA.NUM_WORKERS, 
-                                pin_memory=True, drop_last=True, collate_fn=collate_fn)
-    print(sampler)
-    print(len(dataloader.dataset))
-    #exit()
-    return dataloader"""
 
 class my_sampler(DistributedSampler):
     def __init__(self, dataset, num_replicas = None, batch_size=64,
