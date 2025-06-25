@@ -266,7 +266,7 @@ class SimMIM_testing(nn.Module):
     """
     def __init__(self, encoder, encoder_stride, teacher):
         """
-        Initialization of SimMIM_testing2 class
+        Initialization of SimMIM_testing class
         """
         super().__init__()
         self.encoder = encoder
@@ -354,7 +354,7 @@ class SimMIM_testing(nn.Module):
 
 def build_simmim_testing(config, logger):
     """
-    Builds a SimMIM module with encoder and teacher for testing and uses the SimMIM_testing2 class.
+    Builds a SimMIM module with encoder and teacher for testing and uses the SimMIM_testing class.
     """
     model_type = config.MODEL.TYPE
     if model_type == 'swin':
@@ -376,26 +376,6 @@ def build_simmim_testing(config, logger):
             patch_norm=config.MODEL.SWIN.PATCH_NORM,
             use_checkpoint=config.TRAIN.USE_CHECKPOINT)
         encoder_stride = 32
-        """elif model_type == 'vit':
-        encoder = VisionTransformerForSimMIM(
-            img_size=config.DATA.IMG_SIZE,
-            patch_size=config.MODEL.VIT.PATCH_SIZE,
-            in_chans=config.MODEL.VIT.IN_CHANS,
-            num_classes=0,
-            embed_dim=config.MODEL.VIT.EMBED_DIM,
-            depth=config.MODEL.VIT.DEPTH,
-            num_heads=config.MODEL.VIT.NUM_HEADS,
-            mlp_ratio=config.MODEL.VIT.MLP_RATIO,
-            qkv_bias=config.MODEL.VIT.QKV_BIAS,
-            drop_rate=config.MODEL.DROP_RATE,
-            drop_path_rate=config.MODEL.DROP_PATH_RATE,
-            norm_layer=partial(nn.LayerNorm, eps=1e-6),
-            init_values=config.MODEL.VIT.INIT_VALUES,
-            use_abs_pos_emb=config.MODEL.VIT.USE_APE,
-            use_rel_pos_bias=config.MODEL.VIT.USE_RPB,
-            use_shared_rel_pos_bias=config.MODEL.VIT.USE_SHARED_RPB,
-            use_mean_pooling=config.MODEL.VIT.USE_MEAN_POOLING)
-        encoder_stride = 16"""
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
     teacher = SwinTeacher(
