@@ -109,6 +109,9 @@ class SimMIM(nn.Module):
         self.in_chans = self.encoder.in_chans
         self.patch_size = self.encoder.patch_size
 
+        #New: to make forward adaptable to different image sizes
+        self.img_size = self.teacher.img_size
+
         self.decoder = nn.Sequential(
             nn.Conv2d(
                 in_channels=self.encoder.num_features,
@@ -116,88 +119,42 @@ class SimMIM(nn.Module):
             nn.PixelShuffle(self.encoder_stride),
         )
 
-        #New:
-        self.linear_proj_rgb = nn.Linear(self.encoder.num_features, self.encoder.num_features)
-
         self.projector = nn.Linear(self.encoder.num_features, self.encoder.num_features)
         self.cos = nn.CosineSimilarity(dim=1)
 
 
-    """def forward(self, x, mask):
-        ################## NEW: x for encoder and loss_recon with RGBI, x for teacher with RGB ######################
-        r, zs = self.encoder(x, mask)
-        zs = self.projector(zs)
-        zt = self.teacher(F.interpolate(x, (224, 224), mode='bilinear', align_corners=True))
+    def forward(self, x, mask):
+        ################## NEW: x for encoder with RGBI, x_rgb for teacher with RGB ######################
+
+        # Encoder uses RGBI input
+        r, zs_full = self.encoder(x, mask)
+        zs_full = self.projector(zs_full) # student embedding
+
+        # Teacher only uses RGB bands
+        x_rgb = x[:, :3]
+        if x_rgb.shape[-2:] != (self.img_size, self.img_size):
+            z_t = self.teacher(F.interpolate(x_rgb, (self.img_size, self.img_size), mode='bilinear', align_corners=True))
+        else:
+            z_t = self.teacher(x_rgb)
+
+        # reconstructed RGBI image
         x_rec = self.decoder(r)
 
-        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(1).contiguous()
+        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
+            1).contiguous()
+
+        # L1-Loss for reconstruction
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
         loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
 
-        loss += -(self.cos(zs, zt.detach()).mean())*self.teacher.alpha
-        return loss"""
-    """
-    def forward(self, x, mask):
-        ################## NEW: x für encoder und loss_recon mit RGBI, x für teacher mit RGB ######################
+        reconstruction_loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
+        distillation_loss = -(self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
 
-        # 🟢 Encoder bekommt die volle 4-Kanal Eingabe (RGBI)
-        r, _ = self.encoder(x, mask)
-
-        # ⚠️ Nur die ersten 3 Kanäle (RGB) in den Encoder geben, um zs_rgb zu berechnen
-        x_rgb = x[:, :3]  # 🟢 Nur RGB extrahieren
-        r_rgb, zs_rgb = self.encoder(x_rgb, mask)  # ⚠️ Encoder nochmal nur mit RGB durchlaufen lassen!
-        zs_rgb = self.projector(zs_rgb)  # Feature-Projektion für Distillation Loss
-
-        # 🟢 Teacher bekommt ebenfalls nur RGB
-        zt = self.teacher(F.interpolate(x_rgb, (224, 224), mode='bilinear', align_corners=True))
-
-        # 🟢 Rekonstruktion (RGBI)
-        x_rec = self.decoder(r)  # Rekonstruktion mit 4-Kanälen (RGBI)
-
-        # 🟢 Masken für alle Kanäle anwenden
-        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
-            1).contiguous()
-
-        # 🟢 L1-Loss für 4-Kanal-Rekonstruktion (RGBI)
-        loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans  # in_chans = 4
-
-        # 🟢 Distillation Loss nur mit RGB-basiertem Embedding zs_rgb
-        loss += -(self.cos(zs_rgb, zt.detach()).mean()) * self.teacher.alpha
-
-        return loss
-    """
-    def forward(self, x, mask):
-        ################## NEW: x für encoder mit RGBI, x für teacher mit RGB ######################
-
-        # 🟢 Der Encoder verarbeitet die volle 4-Kanal Eingabe (RGBI)
-        r, zs_full = self.encoder(x, mask)  # 🚀 Volles RGBI-Feature aus dem Encoder
-        zs_full = self.projector(zs_full)  # 🔥 Feature-Space-Transformation
-
-        # 🟢 Teacher bekommt nur RGB
-        x_rgb = x[:, :3]  # 🔥 Extrahiere nur die ersten 3 Kanäle (RGB)
-        z_t = self.teacher(F.interpolate(x_rgb, (224, 224), mode='bilinear', align_corners=True))
-
-        # 🟢 Berechne `z_s` direkt aus dem Encoder, aber nur mit RGB-Informationen
-        #zs_rgb = self.linear_proj_rgb(zs_full[:, :, :3])  # 🔥 Anpassung von RGBI auf RGB-Space
-        zs_rgb = self.linear_proj_rgb(zs_full)  # 🔥 Anpassung von RGBI auf RGB-Space
-
-        # 🟢 Rekonstruktion (RGBI)
-        x_rec = self.decoder(r)  # 🟢 Rekonstruktion mit 4-Kanälen (RGBI)
-
-        # 🟢 Masken für alle Kanäle anwenden
-        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
-            1).contiguous()
-
-        # 🟢 L1-Loss für 4-Kanal-Rekonstruktion (RGBI)
-        loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans  # in_chans = 4
-
-        # 🟢 Distillation Loss nur mit RGB-Embedding aus dem Encoder
+        # Full loss is sum of reconstruction loss and distillation loss
         loss += -(
-            self.cos(zs_rgb, z_t.detach()).mean()) * self.teacher.alpha  # 🔥 Vergleiche Student- und Teacher-Features
+            self.cos(zs_full, z_t.detach()).mean()) * self.teacher.alpha # cosine similarity for distillation loss
 
-        return loss
+        return loss, reconstruction_loss, distillation_loss
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -218,7 +175,7 @@ def build_simmim(config, logger):
         encoder = SwinTransformerForSimMIM(
             img_size=config.DATA.IMG_SIZE,
             patch_size=config.MODEL.SWIN.PATCH_SIZE,
-            in_chans=4, # New! original: config.MODEL.SWIN.IN_CHANS,
+            in_chans=config.MODEL.SWIN.IN_CHANS,
             num_classes=0,
             embed_dim=config.MODEL.SWIN.EMBED_DIM,
             depths=config.MODEL.SWIN.DEPTHS,
@@ -256,14 +213,14 @@ def build_simmim(config, logger):
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
     teacher = SwinTeacher(
-        img_size=224,
+        img_size=config.DATA.TEACHER_IMG_SIZE,
         patch_size=config.MODEL.SWIN.PATCH_SIZE,
-        in_chans=config.MODEL.SWIN.IN_CHANS,
-        num_classes=config.MODEL.NUM_CLASSES,
+        in_chans=config.MODEL.SWIN.IN_CHANS_TEACHER,
+        num_classes= 0,
         embed_dim=config.MODEL.SWIN.EMBED_DIM,
         depths=config.MODEL.SWIN.DEPTHS,
         num_heads=config.MODEL.SWIN.NUM_HEADS,
-        window_size=7,
+        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
         mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
         qkv_bias=config.MODEL.SWIN.QKV_BIAS,
         qk_scale=config.MODEL.SWIN.QK_SCALE,
@@ -272,7 +229,8 @@ def build_simmim(config, logger):
         ape=config.MODEL.SWIN.APE,
         patch_norm=config.MODEL.SWIN.PATCH_NORM,
         use_checkpoint=config.TRAIN.USE_CHECKPOINT,
-        alpha=config.ALPHA)
+        alpha=config.ALPHA
+    )
     load_pretrained(config, teacher, logger)
     model = SimMIM(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
 
@@ -302,6 +260,149 @@ class SwinTeacher(SwinTransformer):
         x = self.forward_features(x)
         return x
 
+class SimMIM_testing(nn.Module):
+    """
+    Class to test models with RGB or RGBI encoders.
+    """
+    def __init__(self, encoder, encoder_stride, teacher):
+        """
+        Initialization of SimMIM_testing class
+        """
+        super().__init__()
+        self.encoder = encoder
+        self.encoder_stride = encoder_stride
+        self.teacher = teacher
+
+        self.in_chans = self.encoder.in_chans
+        self.patch_size = self.encoder.patch_size
+
+        #New: to make forward adaptable to different image sizes
+        self.img_size = self.teacher.img_size
+
+        self.decoder = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.encoder.num_features,
+                out_channels=self.encoder_stride ** 2 * self.in_chans, kernel_size=1),
+            nn.PixelShuffle(self.encoder_stride),
+        )
+
+        self.projector = nn.Linear(self.encoder.num_features, self.encoder.num_features)
+        self.cos = nn.CosineSimilarity(dim=1)
+
+    def forward(self, x, mask):
+        ################## New: x for encoder with RGBI, x_rgb for teacher with RGB ######################
+
+        if self.in_chans == 4:
+            # Encoder uses RGBI input
+            r, _ = self.encoder(x, mask)
+
+            # Teacher only uses RGB bands
+            x_rgb = x[:, :3]
+            x_i = x[:,3]
+
+            # reconstructed RGBI image
+            x_rec = self.decoder(r)
+
+            # use parts of reconstructed RGBI image for RGB and near-infrared calculations
+            x_rec_rgb = x_rec[:, :3]
+            x_rec_i = x_rec[:,3]
+
+        else:
+            # Teacher only uses RGB bands
+            x_rgb = x[:, :3]
+            # Encoder uses RGB input
+            r, _ = self.encoder(x_rgb, mask)
+            # reconstructed RGB image
+            x_rec_rgb = self.decoder(r)
+            x_rec = x_rec_rgb
+
+            rgbi_losses = None
+
+        # scale mask to image size
+        mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(
+            1).contiguous()
+        mask_i = mask.squeeze(1)
+
+        # RGBI and infrared losses can only be calculated if images include the near-infrared channel which we assume is only present with 4 channels for simplicity's sake
+        if self.in_chans == 4:
+            # Losses for RGBI channels
+            l1_loss_recon = F.l1_loss(x, x_rec, reduction='none')
+            l1_recon_loss = (l1_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4 #divide by number of channels
+
+            l2_loss_recon = F.mse_loss(x_rec, x, reduction='none')
+            l2_recon_loss = (l2_loss_recon * mask).sum() / (mask.sum() + 1e-5) / 4 #divide by number of channels
+
+            # Losses for near-infrared channel
+            l1_loss_recon_i = F.l1_loss(x_i, x_rec_i, reduction='none')
+            l1_recon_loss_i = (l1_loss_recon_i * mask_i).sum() / (mask_i.sum() + 1e-5)
+
+            l2_loss_recon_i = F.mse_loss(x_rec_i, x_i, reduction='none')
+            l2_recon_loss_i = (l2_loss_recon_i * mask_i).sum() / (mask_i.sum() + 1e-5)
+
+            rgbi_losses = [l1_recon_loss, l2_recon_loss, l1_recon_loss_i, l2_recon_loss_i]
+
+        # Losses for RGB channels can always be calculated because all implemented models have learned at least on RGB images
+        l1_loss_recon_rgb = F.l1_loss(x_rgb, x_rec_rgb, reduction='none')
+        l1_recon_loss_rgb = (l1_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3 #divide by number of channels
+
+        l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
+        l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3 #divide by number of channels
+
+        return rgbi_losses, [l1_recon_loss_rgb, l2_recon_loss_rgb], x_rec
+
+
+
+def build_simmim_testing(config, logger):
+    """
+    Builds a SimMIM module with encoder and teacher for testing and uses the SimMIM_testing class.
+    """
+    model_type = config.MODEL.TYPE
+    if model_type == 'swin':
+        encoder = SwinTransformerForSimMIM(
+            img_size=config.DATA.IMG_SIZE,
+            patch_size=config.MODEL.SWIN.PATCH_SIZE,
+            in_chans= config.MODEL.SWIN.IN_CHANS,
+            num_classes=0,
+            embed_dim=config.MODEL.SWIN.EMBED_DIM,
+            depths=config.MODEL.SWIN.DEPTHS,
+            num_heads=config.MODEL.SWIN.NUM_HEADS,
+            window_size=config.MODEL.SWIN.WINDOW_SIZE,
+            mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+            qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+            qk_scale=config.MODEL.SWIN.QK_SCALE,
+            drop_rate=config.MODEL.DROP_RATE,
+            drop_path_rate=config.MODEL.DROP_PATH_RATE,
+            ape=config.MODEL.SWIN.APE,
+            patch_norm=config.MODEL.SWIN.PATCH_NORM,
+            use_checkpoint=config.TRAIN.USE_CHECKPOINT)
+        encoder_stride = 32
+    else:
+        raise NotImplementedError(f"Unknown pre-train model: {model_type}")
+    teacher = SwinTeacher(
+        img_size=config.DATA.TEACHER_IMG_SIZE,
+        patch_size=config.MODEL.SWIN.PATCH_SIZE,
+        in_chans=config.MODEL.SWIN.IN_CHANS_TEACHER,
+        num_classes= 0,
+        embed_dim=config.MODEL.SWIN.EMBED_DIM,
+        depths=config.MODEL.SWIN.DEPTHS,
+        num_heads=config.MODEL.SWIN.NUM_HEADS,
+        window_size=config.MODEL.SWIN.TEACHER_WINDOW_SIZE,
+        mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+        qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+        qk_scale=config.MODEL.SWIN.QK_SCALE,
+        drop_rate=config.MODEL.DROP_RATE,
+        drop_path_rate=config.MODEL.DROP_PATH_RATE,
+        ape=config.MODEL.SWIN.APE,
+        patch_norm=config.MODEL.SWIN.PATCH_NORM,
+        use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+        alpha=config.ALPHA
+    )
+    load_pretrained(config, teacher, logger)
+    model = SimMIM_testing(encoder=encoder, encoder_stride=encoder_stride, teacher=teacher)
+
+    return model
+
+
 def load_pretrained(config, model, logger):
     logger.info(f">>>>>>>>>> Fine-tuned from {config.PRETRAINED} ..........")
     checkpoint = torch.load(config.PRETRAINED, map_location='cpu')
@@ -324,7 +425,7 @@ def load_pretrained(config, model, logger):
         if checkpoint_model['patch_embed.proj.weight'].shape[1]==1:
             # greyscale pretrained model
             temp = checkpoint_model['patch_embed.proj.weight'].repeat(1, temp.shape[1],1,1)
-        elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 12 and temp.shape[1] == 3: 
+        elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 12 and temp.shape[1] == 3:
             # For 12 band pretrained, the order is CGBR...
             temp[:,:,:,:] = checkpoint_model['patch_embed.proj.weight'][:,[3,2,1],:,:]
         elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 8:
