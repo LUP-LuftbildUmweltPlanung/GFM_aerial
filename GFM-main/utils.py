@@ -9,6 +9,8 @@ import torch.distributed as dist
 import numpy as np
 from scipy import interpolate
 
+import csv
+
 try:
     # noinspection PyUnresolvedReferences
     from apex import amp
@@ -43,20 +45,37 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
     return max_accuracy
 
 
-def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger):
+def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger, train_loss=None, avg_val_loss=None, new_best_key=False):
     save_state = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'lr_scheduler': lr_scheduler.state_dict(),
                   'max_accuracy': max_accuracy,
                   'epoch': epoch,
-                  'config': config}
+                  'config': config,
+                  'train_loss': train_loss,
+                  'avg_val_loss': avg_val_loss}
     if config.AMP_OPT_LEVEL != "O0":
         save_state['amp'] = amp.state_dict()
 
-    save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
+
+    new_best = "_new_best" if new_best_key else ""
+
+    save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}{new_best}.pth')
     logger.info(f"{save_path} saving......")
     torch.save(save_state, save_path)
     logger.info(f"{save_path} saved !!!")
+
+
+def write_epoch_to_csv(file_path, data, header=None):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    file_exists = os.path.isfile(file_path)
+
+    with open(file_path, mode='a', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists and header is not None:
+            writer.writerow(header)
+        writer.writerow(data)
 
 
 def get_grad_norm(parameters, norm_type=2):

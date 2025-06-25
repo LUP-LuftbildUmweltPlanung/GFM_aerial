@@ -19,17 +19,22 @@ _C.DATA = CN()
 # Batch size for a single GPU, could be overwritten by command line argument
 _C.DATA.BATCH_SIZE = 128
 # Path to dataset, could be overwritten by command line argument
-_C.DATA.DATA_PATH = ''
+_C.DATA.DATA_TRAIN_PATH = ''
+_C.DATA.DATA_VALI_PATH_TEMP_IND = ''
+_C.DATA.DATA_VALI_PATH_SPA_IND = ''
+_C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
+_C.DATA.OUTPUT_LMDB = None
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
 # Input image size
-_C.DATA.IMG_SIZE = 224
+_C.DATA.IMG_SIZE = 384 #192 #224
+_C.DATA.TEACHER_IMG_SIZE = 192 #New
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.
 _C.DATA.PIN_MEMORY = True
 # Number of data loading threads
-_C.DATA.NUM_WORKERS = 8
+_C.DATA.NUM_WORKERS = 0#8
 
 # [SimMIM] Mask patch size for MaskGenerator
 _C.DATA.MASK_PATCH_SIZE = 32
@@ -58,11 +63,13 @@ _C.MODEL.LABEL_SMOOTHING = 0.1
 # Swin Transformer parameters
 _C.MODEL.SWIN = CN()
 _C.MODEL.SWIN.PATCH_SIZE = 4
-_C.MODEL.SWIN.IN_CHANS = 3
+_C.MODEL.SWIN.IN_CHANS = 4
+_C.MODEL.SWIN.IN_CHANS_TEACHER = 3
 _C.MODEL.SWIN.EMBED_DIM = 96
 _C.MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
 _C.MODEL.SWIN.WINDOW_SIZE = 7
+_C.MODEL.SWIN.TEACHER_WINDOW_SIZE = 6
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
@@ -101,7 +108,7 @@ _C.TRAIN.CLIP_GRAD = 5.0
 _C.TRAIN.AUTO_RESUME = True
 # Gradient accumulation steps
 # could be overwritten by command line argument
-_C.TRAIN.ACCUMULATION_STEPS = 0
+_C.TRAIN.ACCUMULATION_STEPS = 2
 # Whether to use gradient checkpointing to save memory
 # could be overwritten by command line argument
 _C.TRAIN.USE_CHECKPOINT = False
@@ -228,8 +235,6 @@ def update_config(config, args):
     # merge from specific arguments
     if _check_args('batch_size'):
         config.DATA.BATCH_SIZE = args.batch_size
-    if _check_args('data_path'):
-        config.DATA.DATA_PATH = args.data_path
     if _check_args('resume'):
         config.MODEL.RESUME = args.resume
     if _check_args('pretrained'):
@@ -255,11 +260,18 @@ def update_config(config, args):
     if _check_args('alpha'):
         config.ALPHA = args.alpha
 
+    config.DATA.DATA_VALI_PATH = [config.DATA.DATA_VALI_PATH_TEMP_IND,
+                                  config.DATA.DATA_VALI_PATH_SPA_IND,
+                                  config.DATA.DATA_VALI_PATH_TEMP_SPA_IND ]
+
     # set local rank for distributed training
     config.LOCAL_RANK = args.local_rank
 
     # output folder
     config.OUTPUT = os.path.join(config.OUTPUT, config.MODEL.NAME, config.TAG)
+
+    # output stats folder
+    config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats")
 
     config.freeze()
 

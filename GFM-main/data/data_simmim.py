@@ -7,12 +7,14 @@
 
 import math
 import random
+import warnings
+
 import numpy as np
 
 import torch
 import torch.distributed as dist
 import torchvision.transforms as T
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torchvision.datasets import ImageFolder
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
@@ -20,6 +22,10 @@ from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 ######
 import data.ben_data as bend
 import os
+
+from safetensors.numpy import load
+import lmdb
+
 from typing import TypeVar, Optional, Iterator
 ######
 
@@ -52,24 +58,44 @@ class MaskGenerator:
 
 
 class SimMIMTransform:
-    def __init__(self, config):
-        if 'bigearthnet' in config.DATA.DATA_PATH:
-            self.transform_img = bend.build_transform(config, split='train')
+    def __init__(self, config, is_train=True, vali_key=None):
+
+        if is_train:
+            data_path = config.DATA.DATA_TRAIN_PATH
+
+            if 'bigearthnet' in data_path:
+                self.transform_img = bend.build_transform(config, split='train')
+            elif data_path.endswith(".lmdb"):
+                self.transform_img = T.Compose([
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
+                    T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
+                    T.RandomHorizontalFlip(),
+                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
+                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
+                ])
+            elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
+                self.transform_img = T.Compose([
+                    T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
+                    T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
+                ])
+            else:
+                raise NotImplementedError
         else:
-            """self.transform_img = T.Compose([
-                T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.ToTensor(),
-                T.Normalize(mean=torch.tensor(IMAGENET_DEFAULT_MEAN),std=torch.tensor(IMAGENET_DEFAULT_STD)),
-            ])"""
-            self.transform_img = T.Compose([
-                T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
-                T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
-                T.RandomHorizontalFlip(),
-                T.ToTensor(),
-                T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5]), std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.5])),
-            ])
+            data_path = config.DATA.DATA_VALI_PATH[vali_key]
+
+            if data_path.endswith(".lmdb"):
+                self.transform_img = T.Compose([
+                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
+                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
+                                std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
+                ])
+            else:
+                raise NotImplementedError
  
         if config.MODEL.TYPE == 'swin':
             model_patch_size=config.MODEL.SWIN.PATCH_SIZE
@@ -84,7 +110,19 @@ class SimMIMTransform:
             model_patch_size=model_patch_size,
             mask_ratio=config.DATA.MASK_RATIO,
         )
-    
+
+    def ensure_four_channels_tensor(self, img):
+        """
+        Ensures that images of lmdb datasets have four channels.
+        """
+        if isinstance(img, torch.Tensor):
+            if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
+                alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
+                img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
+        else:
+            raise NotImplementedError
+        return img
+
     def __call__(self, img):
         img = self.transform_img(img)
         mask = self.mask_generator()
@@ -107,26 +145,103 @@ def collate_fn(batch):
         return ret
 
 
-def build_loader_simmim(config, logger):
-    transform = SimMIMTransform(config)
+class LMDBSafetensorDataset(Dataset):
+    """
+    Class for loading data from lmdb instead of tiff files.
+    """
+
+    def __init__(self, lmdb_path, transform=None):
+        """
+        Constructs an LMDBSafetensorDataset object.
+        """
+        self.lmdb_path = lmdb_path
+        self.transform = transform
+        self.env = lmdb.open(lmdb_path, readonly=True, lock=False)
+
+        with self.env.begin() as txn:
+            self.keys = [key.decode() for key, _ in txn.cursor()]
+
+    def __len__(self):
+        """
+        Function to get the number of items in the dataset.
+        """
+        return len(self.keys)
+
+    def __getitem__(self, index):
+        """
+        Funktion to get a specific item of the dataset.
+
+        Returns:
+            tensor (tensor): A tensor stacked image channels
+            key (byte): The encoded key of the dataset entry as saved in the lmdb file
+        """
+        key = self.keys[index]
+        with self.env.begin() as txn:
+            safetensor_data = txn.get(key.encode())
+
+        if safetensor_data is None:
+            raise KeyError(f"No entry for '{key}' was found in the lmdb!")
+
+        bands_dict = load(safetensor_data)
+
+        self.selected_bands = sorted(list(bands_dict.keys()))
+
+        band_arrays = [bands_dict[b] for b in self.selected_bands if b in bands_dict]
+
+        if len(band_arrays) == 0:
+            raise ValueError(f"No band entries found for '{key}'!")
+
+        stacked_array = np.stack(band_arrays)  # Shape: (C, H, W)
+
+        tensor = torch.from_numpy(stacked_array).float()
+
+        if self.transform is not None:
+            tensor = self.transform(tensor)
+
+        return tensor, key
+
+def build_loader_simmim(config, logger, is_train=True, vali_key=None):
+    if is_train:
+        data_path = config.DATA.DATA_TRAIN_PATH
+        logger.info(f"Train data path: {data_path}")
+    else:
+        data_path = config.DATA.DATA_VALI_PATH[vali_key]
+        logger.info(f"Vali data path: {data_path}")
+
+    transform = SimMIMTransform(config, is_train, vali_key)
     logger.info('Pre-train data transform:\n{}'.format(transform.transform_img))
 
-    if 'GeoPileV0' in config.DATA.DATA_PATH:
+    if data_path.endswith(".lmdb"):
+        logger.info(f"Load LMDB: {data_path}")
+        dataset = LMDBSafetensorDataset(data_path, transform)
+    elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
         datasets = []
-        for ds in os.listdir(config.DATA.DATA_PATH):
-            datasets.append(ImageFolder(os.path.join(config.DATA.DATA_PATH, ds), transform))
+        for ds in os.listdir(data_path):
+            datasets.append(ImageFolder(os.path.join(data_path, ds), transform))
         dataset = torch.utils.data.ConcatDataset(datasets)
     else:
-        dataset = ImageFolder(config.DATA.DATA_PATH, transform)
+        dataset = ImageFolder(data_path, transform)
 
-    logger.info(f'Build dataset: train images = {len(dataset)}')
-    
-    sampler = DistributedSampler(dataset, num_replicas=dist.get_world_size(), rank=dist.get_rank(), shuffle=True)
-    dataloader = DataLoader(dataset, config.DATA.BATCH_SIZE, sampler=sampler, num_workers=config.DATA.NUM_WORKERS, 
-                                pin_memory=True, drop_last=True, collate_fn=collate_fn)
-    print(sampler)
-    print(len(dataloader.dataset))
-    #exit()
+    logger.info(f'Build dataset: images = {len(dataset)}')
+
+    # Sampler: Train = shuffle, Val = no shuffle
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=dist.get_world_size(),
+        rank=dist.get_rank(),
+        shuffle=is_train
+    )
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.DATA.BATCH_SIZE,
+        sampler=sampler,
+        num_workers=config.DATA.NUM_WORKERS,
+        pin_memory=True,
+        drop_last=is_train,  # just for training
+        collate_fn=collate_fn
+    )
+
     return dataloader
 
 class my_sampler(DistributedSampler):
