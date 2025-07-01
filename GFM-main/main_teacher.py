@@ -518,6 +518,52 @@ class HyperOpti:
         logger.info(str(model))
 
         # TODO update config here using trial object
+        # relevant:
+        # DATA.BATCH_SIZE
+        # DATA.INTERPOLATION 
+        # DATA.MASK_PATCH_SIZE
+        # DATA.MASK_RATIO
+        #
+        # MODEL.DROP_RATE
+        # MODEL.DROP_PATH_RATE
+        # MODEL.LABEL_SMOOTHING
+        # 
+        # TRAIN.EPOCHS
+        # TRAIN.WARMUP_EPOCHS
+        # TRAIN.WEIGHT_DECAY
+        # TRAIN.BASE_LR
+        # TRAIN.WARMUP_LR
+        # TRAIN.MIN_LR
+        # TRAIN.CLIP_GRAD
+        # TRAIN.ACCUMULATION_STEPS
+        # TRAIN.LR_SCHEDULER.NAME
+        # TRAIN.LR_SCHEDULER.DECAY_EPOCHS
+        # TRAIN.LR_SCHEDULER.DECAY_RATE
+        # TRAIN.LR_SCHEDULER.GAMMA
+        # TRAIN.LR_SCHEDULER.MULTISTEPS
+        # TRAIN.OPTIMIZER.NAME (maybe not relevant if we stick to adamw)
+        # TRAIN.OPTIMIZER.EPS
+        # TRAIN.OPTIMIZER.BETAS
+        # TRAIN.OPTIMIZER.MOMENTUM
+        # TRAIN.LAYER_DECAY
+        # 
+        # AUG.COLOR_JITTER
+        # AUG.AUTO_AUGMENT (what is this?)
+        # AUG.REPROB
+        # AUG.REMODE
+        # AUG.RECOUNT
+        # AUG.MIXUP
+        # AUG.CUTMIX
+        # AUG.CUTMIX_MINMAX
+        # AUG.MIXUP_PROB
+        # AUG.MIXUP_SWITCH_PROB
+        # AUG.MIXUP_MODE
+        #
+        # AMP_OPT_LEVEL (relevant?)
+        # _C.TRAIN_FRAC
+        # NO_VAL
+        # ALPHA
+        #
 
         optimizer = build_optimizer(self.config, model, logger, is_pretrain=True)
         if self.config.AMP_OPT_LEVEL != "O0":
