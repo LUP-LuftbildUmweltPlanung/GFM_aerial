@@ -18,7 +18,7 @@ from timm.utils import AverageMeter
 import pandas as pd
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
-from mlflow_config import *
+from mlflow_config_example import *
 
 from config import get_config
 from models.teacher import build_simmim
@@ -50,7 +50,7 @@ def setup_mlflow_function():
     client = MlflowClient()
 
     # Define Experiment Name
-    experiment_name = "GFMaerial_testing_test"
+    experiment_name = "GFMaerial_pretraining"
 
     # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
@@ -246,7 +246,7 @@ def main(config):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 
     # Save statistics to MLflow
-    if dist.get_rank() == 0:
+    if dist.get_rank() == 0 and log_to_mlflow is True:
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Training time {}'.format(total_time_str))
