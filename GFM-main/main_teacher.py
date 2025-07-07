@@ -20,14 +20,12 @@ from timm.utils import AverageMeter
 import pandas as pd
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
-from mlflow_config import *
 
 from config import get_config
 from models.teacher import build_simmim
 from data import build_loader
 from lr_scheduler import build_scheduler
 from optimizer import build_optimizer
-from hyperparam_optimization import optimize_params
 from logger import create_logger
 from utils import load_checkpoint, save_checkpoint, get_grad_norm, auto_resume_helper, write_epoch_to_csv
 

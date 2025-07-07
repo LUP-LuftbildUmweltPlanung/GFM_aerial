@@ -18,7 +18,6 @@ from timm.utils import AverageMeter
 import pandas as pd
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
-from mlflow_config import *
 
 from config import get_config
 from models.teacher import build_simmim_testing
