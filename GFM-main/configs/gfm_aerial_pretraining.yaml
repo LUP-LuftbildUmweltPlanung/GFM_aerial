@@ -15,10 +15,10 @@ DATA:
   TEACHER_IMG_SIZE: 192 #for gfm, 224 for swin
   MASK_PATCH_SIZE: 32 #number of masked-out areas per image
   MASK_RATIO: 0.6 #masked % of image range [0,1]
-  DATA_TRAIN_PATH: "PATH"
-  DATA_VALI_PATH_TEMP_IND: "PATH"
-  DATA_VALI_PATH_SPA_IND: "PATH"
-  DATA_VALI_PATH_TEMP_SPA_IND: "PATH"
+  DATA_TRAIN_PATH: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
+  DATA_VALI_PATH_TEMP_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
+  DATA_VALI_PATH_SPA_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
+  DATA_VALI_PATH_TEMP_SPA_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
   OUTPUT_LMDB: None #save reconstructed images when testing
 TRAIN:
   EPOCHS: 100

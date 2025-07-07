@@ -504,12 +504,12 @@ class HyperOpti:
 
         self.study = optuna.create_study(direction="maximize")
 
-    def objective(self, trial):
-        data_loader_train = build_loader(self.config, logger, is_pretrain=True, is_train=True)
-        data_loader_vali_temp_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=0)
-        data_loader_vali_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=1)
-        data_loader_vali_temp_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=2)
+        self.data_loader_train = build_loader(self.config, logger, is_pretrain=True, is_train=True)
+        self.data_loader_vali_temp_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=0)
+        self.data_loader_vali_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=1)
+        self.data_loader_vali_temp_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=2)
 
+    def objective(self, trial):
         logger.info(f"Creating model:{self.config.MODEL.TYPE}/{self.config.MODEL.NAME}")
         model = build_simmim(self.config, logger)
         model.cuda()
@@ -581,20 +581,13 @@ class HyperOpti:
         best_val_loss = float('inf')
 
         for epoch in range(self.config.TRAIN.START_EPOCH, self.config.TRAIN.EPOCHS):
-            data_loader_train.sampler.set_epoch(epoch)
+            self.data_loader_train.sampler.set_epoch(epoch)
 
-            train_loss = train_one_epoch(self.config, model, data_loader_train, optimizer, epoch, lr_scheduler)
-            val_loss_temp_ind = validate_one_epoch(self.config, model, data_loader_vali_temp_ind, epoch, val_key="temp_ind")
-            val_loss_spa_ind = validate_one_epoch(self.config, model, data_loader_vali_spa_ind, epoch, val_key="spa_ind")
-            val_loss_temp_spa_ind = validate_one_epoch(self.config, model, data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
+            train_loss = train_one_epoch(self.config, model, self.data_loader_train, optimizer, epoch, lr_scheduler)
+            val_loss_temp_ind = validate_one_epoch(self.config, model, self.data_loader_vali_temp_ind, epoch, val_key="temp_ind")
+            val_loss_spa_ind = validate_one_epoch(self.config, model, self.data_loader_vali_spa_ind, epoch, val_key="spa_ind")
+            val_loss_temp_spa_ind = validate_one_epoch(self.config, model, self.data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
             avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3
-
-            if dist.get_rank() == 0 and (avg_val_loss < best_val_loss or (epoch % self.config.SAVE_FREQ == 0 or epoch == (self.config.TRAIN.EPOCHS - 1))):
-                if avg_val_loss < best_val_loss:
-                    best_val_loss = avg_val_loss
-                    save_checkpoint(self.config, epoch, model_without_ddp, 0, optimizer, lr_scheduler, logger, train_loss, avg_val_loss, new_best_key=True)
-                else:
-                    save_checkpoint(self.config, epoch, model_without_ddp, 0, optimizer, lr_scheduler, logger, train_loss, avg_val_loss, new_best_key=False)
 
         trial.report(val_loss_temp_ind, val_loss_spa_ind, val_loss_temp_spa_ind, train_loss, epoch) # TODO
 
