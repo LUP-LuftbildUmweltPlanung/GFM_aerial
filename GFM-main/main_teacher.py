@@ -575,7 +575,7 @@ class HyperOpti:
             flops = model_without_ddp.flops()
             logger.info(f"number of GFLOPs: {flops / 1e9}")
 
-        lr_scheduler = build_scheduler(self.config, optimizer, len(data_loader_train))
+        lr_scheduler = build_scheduler(self.config, optimizer, len(self.data_loader_train))
 
         logger.info("Start training")
         best_val_loss = float('inf')
