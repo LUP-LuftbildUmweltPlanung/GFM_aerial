@@ -264,14 +264,12 @@ def save_in_lmdb(db, x_reconstructed, key):
         x_reconstructed (tensor): reconstructed image, normalized pixel values
         key (bytestring): key from original lmdb file
     """
+    logger.info(x_reconstructed.shape)
 
     for i in range(len(key)):
         # img shape: (B, 4, H, W)
         img_inv = inverse_normalize(x_reconstructed[i])
         img_inv = (img_inv * 255.0).clamp(0, 255).to(torch.uint8)
-
-        #### visualize mask:
-        #img_inv = x_reconstructed.to(torch.uint8)
 
         bands_dict = {}
         for j in range(img_inv.size(0)):
@@ -283,8 +281,35 @@ def save_in_lmdb(db, x_reconstructed, key):
     logger.info("reconstructed batch written to lmdb")
     return
 
+def save_in_lmdb_mask(db, x_reconstructed, key):
+    """
+    Saves a reconstructed image in lmdb format with the key of the original lmdb file.
 
-def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
+    Parameters:
+        db (lmdb object): lmdb file
+        x_reconstructed (tensor): reconstructed image, normalized pixel values
+        key (bytestring): key from original lmdb file
+    """
+
+    for i in range(len(key)):
+        # img shape: (B, 4, H, W)
+        #img_inv = inverse_normalize(x_reconstructed[i])
+        #img_inv = (img_inv * 255.0).clamp(0, 255).to(torch.uint8)
+
+        #### visualize mask:
+        img_inv = x_reconstructed[i].to(torch.uint8)
+
+        bands_dict = {}
+        for j in range(img_inv.size(0)):
+            bands_dict[f"{j}"] = img_inv[j].cpu().numpy()
+        safetensor_img = save_bands_to_safetensor(bands_dict)
+
+        write_to_lmdb(db, key[i], safetensor_img)
+    logger.info("reconstructed batch written to lmdb")
+    return
+
+
+def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None, output_lmdb_mask=None):
     """
     If the input image does not match the encoder image size, the model is applied patch wise and the result is merged.
 
@@ -314,19 +339,24 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
 
     if output_lmdb:
         aggregated_x_rec = torch.zeros(x_rgbi.shape)
+    if output_lmdb_mask:
+        aggregated_mask = torch.zeros(x_rgbi.size(0), 1, x_rgbi.size(2), x_rgbi.size(3))
 
     for i in range(0, H, patch_size):
         for j in range(0, W, patch_size):
             x_patch = x_rgbi[:, :, i:i + patch_size, j:j + patch_size]
             mask_patch = mask
 
-            if output_lmdb:
-                rgbi_losses, rgb_losses, x_reconstructed = model(x_patch, mask_patch)
+            if output_lmdb or output_lmdb_mask:
+                rgbi_losses, rgb_losses, x_reconstructed, recon_mask = model(x_patch, mask_patch)
 
-                aggregated_x_rec[:,:config.MODEL.SWIN.IN_CHANS,i:i+patch_size, j:j + patch_size] = x_reconstructed
+                if output_lmdb:
+                    aggregated_x_rec[:, :config.MODEL.SWIN.IN_CHANS, i:i+patch_size, j:j + patch_size] = x_reconstructed
+                if output_lmdb_mask:
+                    aggregated_mask[:, 0, i:i+patch_size, j:j + patch_size] = recon_mask.squeeze()
 
             else:
-                rgbi_losses, rgb_losses, _ = model(x_patch, mask_patch)
+                rgbi_losses, rgb_losses, _, _ = model(x_patch, mask_patch)
 
             if config.MODEL.SWIN.IN_CHANS == 4:
                 rgbi_total[0] += rgbi_losses[0].item()
@@ -340,6 +370,9 @@ def test_on_large_image(config, model, x_rgbi, mask, key, output_lmdb=None):
     if output_lmdb:
         db = create_or_open_lmdb(output_lmdb)
         save_in_lmdb(db, aggregated_x_rec, key)
+    if output_lmdb_mask:
+        db_mask = create_or_open_lmdb(output_lmdb_mask)
+        save_in_lmdb_mask(db_mask, aggregated_mask, key)
 
     if config.MODEL.SWIN.IN_CHANS == 4:
         avg_rgbi_loss.append(rgbi_total[0] / patch_count)
@@ -413,7 +446,9 @@ def test_generalization(config, model, data_loader, lmdb_key=True, test_key="spa
 
         img = img.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
-        losses_rgbi, losses_rgb = test_on_large_image(config, model, img, mask, key, output_lmdb=config.DATA.OUTPUT_LMDB)
+        losses_rgbi, losses_rgb = test_on_large_image(config, model, img, mask, key,
+                                                      output_lmdb=config.DATA.OUTPUT_LMDB,
+                                                      output_lmdb_mask=config.DATA.OUTPUT_LMDB_MASK)
 
         torch.cuda.synchronize()
 

@@ -348,7 +348,7 @@ class SimMIM_testing(nn.Module):
         l2_loss_recon_rgb = F.mse_loss(x_rec_rgb, x_rgb, reduction='none')
         l2_recon_loss_rgb = (l2_loss_recon_rgb * mask).sum() / (mask.sum() + 1e-5) / 3 #divide by number of channels
 
-        return rgbi_losses, [l1_recon_loss_rgb, l2_recon_loss_rgb], x_rec
+        return rgbi_losses, [l1_recon_loss_rgb, l2_recon_loss_rgb], x_rec, mask
 
 
 

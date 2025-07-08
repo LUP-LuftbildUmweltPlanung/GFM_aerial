@@ -20,6 +20,7 @@ DATA:
   DATA_VALI_PATH_SPA_IND: "PATH"
   DATA_VALI_PATH_TEMP_SPA_IND: "PATH"
   OUTPUT_LMDB: None #save reconstructed images when testing
+  OUTPUT_LMDB_MASK: None # save mask when testing
 TRAIN:
   EPOCHS: 100
   WARMUP_EPOCHS: 10
