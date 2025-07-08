@@ -18,7 +18,9 @@ from timm.utils import AverageMeter
 import pandas as pd
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
+
 from mlflow_config_example import *
+
 
 from config import get_config
 from models.teacher import build_simmim_testing
@@ -224,6 +226,7 @@ def main(config):
 
     # save statistics to MLflow
     if dist.get_rank() == 0 and log_to_mlflow is True:
+
         mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Testing time {}'.format(total_time_str))
