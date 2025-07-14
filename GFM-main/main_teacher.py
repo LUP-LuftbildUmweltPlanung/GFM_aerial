@@ -10,8 +10,6 @@ import datetime
 import numpy as np
 import socket
 
-import optuna
-from optuna.trial import TrialState
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -51,7 +49,7 @@ def setup_mlflow_function():
     client = MlflowClient()
 
     # Define Experiment Name
-    experiment_name = "GFMaerial_testing_test"
+    experiment_name = "GFMaerial_pretraining"
 
     # Check if the Experiment Exists
     experiment = client.get_experiment_by_name(experiment_name)
@@ -245,10 +243,6 @@ def main(config):
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-
-    # Save statistics to MLflow
-    if dist.get_rank() == 0:
-        mlflow_logging_workflow(config.OUTPUT_STATS)
 
     logger.info('Training time {}'.format(total_time_str))
 
@@ -497,131 +491,6 @@ def validate_one_epoch(config, model, data_loader, epoch, val_key="spa_ind"):
 
     return loss_meter.avg
 
-class HyperOpti:
-    def __init__(self, config):
-        config.defrost()
-        self.config = config
-
-        self.study = optuna.create_study(direction="maximize")
-
-        self.data_loader_train = build_loader(self.config, logger, is_pretrain=True, is_train=True)
-        self.data_loader_vali_temp_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=0)
-        self.data_loader_vali_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=1)
-        self.data_loader_vali_temp_spa_ind = build_loader(self.config, logger, is_pretrain=True, is_train=False, vali_key=2)
-
-    def objective(self, trial):
-        logger.info(f"Creating model:{self.config.MODEL.TYPE}/{self.config.MODEL.NAME}")
-        model = build_simmim(self.config, logger)
-        model.cuda()
-        logger.info(str(model))
-
-        # TODO update config here using trial object
-        # relevant:
-        # DATA.BATCH_SIZE
-        # DATA.INTERPOLATION 
-        # DATA.MASK_PATCH_SIZE
-        # DATA.MASK_RATIO
-        #
-        # MODEL.DROP_RATE
-        # MODEL.DROP_PATH_RATE
-        # MODEL.LABEL_SMOOTHING
-        # 
-        # TRAIN.EPOCHS
-        # TRAIN.WARMUP_EPOCHS
-        # TRAIN.WEIGHT_DECAY
-        # TRAIN.BASE_LR
-        # TRAIN.WARMUP_LR
-        # TRAIN.MIN_LR
-        # TRAIN.CLIP_GRAD
-        # TRAIN.ACCUMULATION_STEPS
-        # TRAIN.LR_SCHEDULER.NAME
-        # TRAIN.LR_SCHEDULER.DECAY_EPOCHS
-        # TRAIN.LR_SCHEDULER.DECAY_RATE
-        # TRAIN.LR_SCHEDULER.GAMMA
-        # TRAIN.LR_SCHEDULER.MULTISTEPS
-        # TRAIN.OPTIMIZER.NAME (maybe not relevant if we stick to adamw)
-        # TRAIN.OPTIMIZER.EPS
-        # TRAIN.OPTIMIZER.BETAS
-        # TRAIN.OPTIMIZER.MOMENTUM
-        # TRAIN.LAYER_DECAY
-        # 
-        # AUG.COLOR_JITTER
-        # AUG.AUTO_AUGMENT (what is this?)
-        # AUG.REPROB
-        # AUG.REMODE
-        # AUG.RECOUNT
-        # AUG.MIXUP
-        # AUG.CUTMIX
-        # AUG.CUTMIX_MINMAX
-        # AUG.MIXUP_PROB
-        # AUG.MIXUP_SWITCH_PROB
-        # AUG.MIXUP_MODE
-        #
-        # AMP_OPT_LEVEL (relevant?)
-        # _C.TRAIN_FRAC
-        # NO_VAL
-        # ALPHA
-        #
-
-        optimizer = build_optimizer(self.config, model, logger, is_pretrain=True)
-        if self.config.AMP_OPT_LEVEL != "O0":
-            model, optimizer = amp.initialize(model, optimizer, opt_level=self.config.AMP_OPT_LEVEL)
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.config.LOCAL_RANK], broadcast_buffers=False)
-        model_without_ddp = model.module
-
-        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        logger.info(f"number of params: {n_parameters}")
-        if hasattr(model_without_ddp, 'flops'):
-            flops = model_without_ddp.flops()
-            logger.info(f"number of GFLOPs: {flops / 1e9}")
-
-        lr_scheduler = build_scheduler(self.config, optimizer, len(self.data_loader_train))
-
-        logger.info("Start training")
-        best_val_loss = float('inf')
-
-        for epoch in range(self.config.TRAIN.START_EPOCH, self.config.TRAIN.EPOCHS):
-            self.data_loader_train.sampler.set_epoch(epoch)
-
-            train_loss = train_one_epoch(self.config, model, self.data_loader_train, optimizer, epoch, lr_scheduler)
-            val_loss_temp_ind = validate_one_epoch(self.config, model, self.data_loader_vali_temp_ind, epoch, val_key="temp_ind")
-            val_loss_spa_ind = validate_one_epoch(self.config, model, self.data_loader_vali_spa_ind, epoch, val_key="spa_ind")
-            val_loss_temp_spa_ind = validate_one_epoch(self.config, model, self.data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
-            avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind +val_loss_temp_spa_ind)/3
-
-        trial.report(val_loss_temp_ind, val_loss_spa_ind, val_loss_temp_spa_ind, train_loss, epoch) # TODO
-
-        # Handle pruning based on the intermediate value.
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
-        
-        return avg_val_loss
-    
-    def optimize(self):
-        # TODO set params
-        self.study.optimize(self.objective, n_trials=100, timeout=600)
-
-        pruned_trials = self.study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
-        complete_trials = self.study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
-
-        print("Study statistics: ")
-        print("  Number of finished trials: ", len(self.study.trials))
-        print("  Number of pruned trials: ", len(pruned_trials))
-        print("  Number of complete trials: ", len(complete_trials))
-
-        print("Best trial:")
-        trial = self.study.best_trial
-
-        print("  Value: ", trial.value)
-
-        print("  Params: ")
-        for key, value in trial.params.items():
-            print("    {}: {}".format(key, value))
-
-        # TODO updated config
-        config.freeze()
-        return config
-
 
 if __name__ == '__main__':
     _, config = parse_option()
@@ -666,9 +535,6 @@ if __name__ == '__main__':
     config.TRAIN.MIN_LR = linear_scaled_min_lr
     config.freeze()
 
-    HyperOpti = HyperOpti(config)
-    config = HyperOpti.optimize()
-
     os.makedirs(config.OUTPUT, exist_ok=True)
     logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
 
@@ -678,8 +544,6 @@ if __name__ == '__main__':
             f.write(config.dump())
         logger.info(f"Full config saved to {path}")
 
-    # print config
-    #logger.info(config.dump())
 
     main(config)
 

@@ -1,0 +1,255 @@
+# --------------------------------------------------------
+# Based from SimMIM codebase
+# https://github.com/microsoft/SimMIM
+# --------------------------------------------------------
+
+import os
+import numpy as np
+
+from ConfigSpace import (
+    Categorical,
+    Configuration,
+    ConfigurationSpace,
+    EqualsCondition,
+    Float,
+    InCondition,
+    Integer,
+)
+
+from smac import MultiFidelityFacade as MFFacade
+from smac import Scenario
+from smac.facade import AbstractFacade
+from smac.intensifier.hyperband import Hyperband
+from smac.intensifier.successive_halving import SuccessiveHalving
+
+import torch
+import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+
+from models.teacher import build_simmim
+from data import build_loader
+from lr_scheduler import build_scheduler
+from optimizer import build_optimizer
+from logger import create_logger
+
+from main_teacher import train_one_epoch, validate_one_epoch, parse_option
+
+
+
+# Optimize PyTorch precision
+torch.set_float32_matmul_precision('medium')
+
+
+class HyperOpti:
+    def __init__(self, config):
+        config.defrost()
+        self.external_config = config
+
+        self.data_loader_train = build_loader(self.external_config, logger, is_pretrain=True, is_train=True)
+        self.data_loader_vali_temp_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=0)
+        self.data_loader_vali_spa_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=1)
+        self.data_loader_vali_temp_spa_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=2)
+
+    @property
+    def configspace(self) -> ConfigurationSpace:
+        # Build Configuration Space which defines all parameters and their ranges.
+        # To illustrate different parameter types, we use continuous, integer and categorical parameters.
+        cs = ConfigurationSpace()
+
+        n_layer = Integer("n_layer", (1, 5), default=1)
+        n_neurons = Integer("n_neurons", (8, 256), log=True, default=10)
+        activation = Categorical("activation", ["logistic", "tanh", "relu"], default="tanh")
+        solver = Categorical("solver", ["lbfgs", "sgd", "adam"], default="adam")
+        batch_size = Integer("batch_size", (30, 300), default=200)
+        learning_rate = Categorical("learning_rate", ["constant", "invscaling", "adaptive"], default="constant")
+        learning_rate_init = Float("learning_rate_init", (0.0001, 1.0), default=0.001, log=True)
+
+        # Add all hyperparameters at once:
+        cs.add([n_layer, n_neurons, activation, solver, batch_size, learning_rate, learning_rate_init])
+
+        # Adding conditions to restrict the hyperparameter space...
+        # ... since learning rate is only used when solver is 'sgd'.
+        use_lr = EqualsCondition(child=learning_rate, parent=solver, value="sgd")
+        # ... since learning rate initialization will only be accounted for when using 'sgd' or 'adam'.
+        use_lr_init = InCondition(child=learning_rate_init, parent=solver, values=["sgd", "adam"])
+        # ... since batch size will not be considered when optimizer is 'lbfgs'.
+        use_batch_size = InCondition(child=batch_size, parent=solver, values=["sgd", "adam"])
+
+        # We can also add multiple conditions on hyperparameters at once:
+        cs.add([use_lr, use_batch_size, use_lr_init])
+
+        return cs
+        # TODO update config here using trial object
+        # relevant:
+        # DATA.BATCH_SIZE
+        # DATA.INTERPOLATION 
+        # DATA.MASK_PATCH_SIZE
+        # DATA.MASK_RATIO
+        #
+        # MODEL.DROP_RATE
+        # MODEL.DROP_PATH_RATE
+        # MODEL.LABEL_SMOOTHING
+        # 
+        # TRAIN.EPOCHS
+        # TRAIN.WARMUP_EPOCHS
+        # TRAIN.WEIGHT_DECAY
+        # TRAIN.BASE_LR
+        # TRAIN.WARMUP_LR
+        # TRAIN.MIN_LR
+        # TRAIN.CLIP_GRAD
+        # TRAIN.ACCUMULATION_STEPS
+        # TRAIN.LR_SCHEDULER.NAME
+        # TRAIN.LR_SCHEDULER.DECAY_EPOCHS
+        # TRAIN.LR_SCHEDULER.DECAY_RATE
+        # TRAIN.LR_SCHEDULER.GAMMA
+        # TRAIN.LR_SCHEDULER.MULTISTEPS
+        # TRAIN.OPTIMIZER.NAME (maybe not relevant if we stick to adamw)
+        # TRAIN.OPTIMIZER.EPS
+        # TRAIN.OPTIMIZER.BETAS
+        # TRAIN.OPTIMIZER.MOMENTUM
+        # TRAIN.LAYER_DECAY
+        # 
+        # AUG.COLOR_JITTER
+        # AUG.AUTO_AUGMENT (what is this?)
+        # AUG.REPROB
+        # AUG.REMODE
+        # AUG.RECOUNT
+        # AUG.MIXUP
+        # AUG.CUTMIX
+        # AUG.CUTMIX_MINMAX
+        # AUG.MIXUP_PROB
+        # AUG.MIXUP_SWITCH_PROB
+        # AUG.MIXUP_MODE
+        #
+        # AMP_OPT_LEVEL (relevant?)
+        # _C.TRAIN_FRAC
+        # NO_VAL
+        # ALPHA
+
+    def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
+        # self.external_config.value = config["value"]
+
+        # linear scale the learning rate according to total batch size, may not be optimal
+        linear_scaled_lr = self.external_config.TRAIN.BASE_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+        linear_scaled_warmup_lr = self.external_config.TRAIN.WARMUP_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+        linear_scaled_min_lr = self.external_config.TRAIN.MIN_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+        # gradient accumulation also need to scale the learning rate
+        if self.self.external_config.TRAIN.ACCUMULATION_STEPS > 1:
+            linear_scaled_lr = linear_scaled_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
+            linear_scaled_warmup_lr = linear_scaled_warmup_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
+            linear_scaled_min_lr = linear_scaled_min_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
+            self.external_config.defrost()
+        self.external_config.TRAIN.BASE_LR = linear_scaled_lr
+        self.external_config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
+        self.external_config.TRAIN.MIN_LR = linear_scaled_min_lr
+        self.external_config.freeze()
+
+        model = build_simmim(self.external_config, logger)
+        model.cuda()
+
+        optimizer = build_optimizer(self.external_config, model, logger, is_pretrain=True)
+
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.external_config.LOCAL_RANK], broadcast_buffers=False)
+        model_without_ddp = model.module
+
+        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if hasattr(model_without_ddp, 'flops'):
+            flops = model_without_ddp.flops()
+
+        lr_scheduler = build_scheduler(self.external_config, optimizer, len(self.data_loader_train))
+
+        # TODO: adjust epochs based on budget
+        for epoch in range(self.external_config.TRAIN.START_EPOCH, self.external_config.TRAIN.EPOCHS):
+            self.data_loader_train.sampler.set_epoch(epoch)
+
+            train_loss = train_one_epoch(self.external_config, model, self.data_loader_train, optimizer, epoch, lr_scheduler)
+            val_loss_temp_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_temp_ind, epoch, val_key="temp_ind")
+            val_loss_spa_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_spa_ind, epoch, val_key="spa_ind")
+            val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
+            avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind + val_loss_temp_spa_ind)/3
+
+        # TODO: which loss?
+        
+        return avg_val_loss
+    
+    def optimize(self):
+        pass
+
+
+if __name__ == '__main__':
+    _, config = parse_option()
+
+
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ['WORLD_SIZE'])
+        print(f"RANK and WORLD_SIZE in environ: {rank}/{world_size}")
+    else:
+        rank = 0
+        world_size = 1
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+    torch.cuda.set_device(config.LOCAL_RANK)
+
+    print(f"Process {rank} uses device: {torch.cuda.current_device()} ({torch.cuda.get_device_name(torch.cuda.current_device())})")
+
+    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+    torch.distributed.barrier()
+
+    seed = config.SEED + dist.get_rank()
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    cudnn.benchmark = True
+
+    hyperopti = HyperOpti()
+
+    facades: list[AbstractFacade] = []
+    for intensifier_object in [SuccessiveHalving, Hyperband]:
+        # Define our environment variables
+        scenario = Scenario(
+            hyperopti.configspace,
+            walltime_limit=60,  # After 60 seconds, we stop the hyperparameter optimization
+            n_trials=500,  # Evaluate max 500 different trials
+            min_budget=1,  # Train the MLP using a hyperparameter configuration for at least 5 epochs
+            max_budget=25,  # Train the MLP using a hyperparameter configuration for at most 25 epochs
+            n_workers=8,
+        )
+
+        # We want to run five random configurations before starting the optimization.
+        initial_design = MFFacade.get_initial_design(scenario, n_configs=5)
+
+        # Create our intensifier
+        intensifier = intensifier_object(scenario, incumbent_selection="highest_budget")
+
+        # Create our SMAC object and pass the scenario and the train method
+        smac = MFFacade(
+            scenario,
+            hyperopti.train,
+            initial_design=initial_design,
+            intensifier=intensifier,
+            overwrite=True,
+        )
+
+        # Let's optimize
+        incumbent = smac.optimize()
+
+        # Get cost of default configuration
+        default_cost = smac.validate(hyperopti.configspace.get_default_configuration())
+        print(f"Default cost ({intensifier.__class__.__name__}): {default_cost}")
+
+        # Let's calculate the cost of the incumbent
+        incumbent_cost = smac.validate(incumbent)
+        print(f"Incumbent cost ({intensifier.__class__.__name__}): {incumbent_cost}")
+
+        facades.append(smac)
+
+    os.makedirs(config.OUTPUT, exist_ok=True)
+    logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
+
+    if dist.get_rank() == 0:
+        path = os.path.join(config.OUTPUT, "config.json")
+        with open(path, "w") as f:
+            f.write(config.dump())
+        logger.info(f"Full config saved to {path}")
+
+
