@@ -56,27 +56,13 @@ class HyperOpti:
         # To illustrate different parameter types, we use continuous, integer and categorical parameters.
         cs = ConfigurationSpace()
 
-        n_layer = Integer("n_layer", (1, 5), default=1)
-        n_neurons = Integer("n_neurons", (8, 256), log=True, default=10)
-        activation = Categorical("activation", ["logistic", "tanh", "relu"], default="tanh")
-        solver = Categorical("solver", ["lbfgs", "sgd", "adam"], default="adam")
-        batch_size = Integer("batch_size", (30, 300), default=200)
-        learning_rate = Categorical("learning_rate", ["constant", "invscaling", "adaptive"], default="constant")
-        learning_rate_init = Float("learning_rate_init", (0.0001, 1.0), default=0.001, log=True)
+        drop_rate = Float("drop_rate", (0.0, 1.0), default=0.0)
+        batch_size = Integer("batch_size", (60, 200), default=128)
+        weight_decay = Float("weight_decay", (0.0, 1.0), default=0.05)
+        base_lr = Float("base_lr", (0.00001, 1.0), default=2e-4, log=True)
 
         # Add all hyperparameters at once:
-        cs.add([n_layer, n_neurons, activation, solver, batch_size, learning_rate, learning_rate_init])
-
-        # Adding conditions to restrict the hyperparameter space...
-        # ... since learning rate is only used when solver is 'sgd'.
-        use_lr = EqualsCondition(child=learning_rate, parent=solver, value="sgd")
-        # ... since learning rate initialization will only be accounted for when using 'sgd' or 'adam'.
-        use_lr_init = InCondition(child=learning_rate_init, parent=solver, values=["sgd", "adam"])
-        # ... since batch size will not be considered when optimizer is 'lbfgs'.
-        use_batch_size = InCondition(child=batch_size, parent=solver, values=["sgd", "adam"])
-
-        # We can also add multiple conditions on hyperparameters at once:
-        cs.add([use_lr, use_batch_size, use_lr_init])
+        cs.add([drop_rate, batch_size, weight_decay, base_lr])
 
         return cs
         # TODO update config here using trial object
@@ -90,7 +76,6 @@ class HyperOpti:
         # MODEL.DROP_PATH_RATE
         # MODEL.LABEL_SMOOTHING
         # 
-        # TRAIN.EPOCHS
         # TRAIN.WARMUP_EPOCHS
         # TRAIN.WEIGHT_DECAY
         # TRAIN.BASE_LR
@@ -128,6 +113,10 @@ class HyperOpti:
 
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
         # self.external_config.value = config["value"]
+        self.external_config.MODEL.DROP_RATE = config["drop_rate"]
+        self.external_config.DATA.BATCH_SIZE = config["batch_size"]
+        self.external_config.TRAIN.WEIGHT_DECAY = config["weight_decay"]
+        self.external_config.TRAIN.BASE_LR = config["base_lr"]
 
         # linear scale the learning rate according to total batch size, may not be optimal
         linear_scaled_lr = self.external_config.TRAIN.BASE_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
@@ -150,11 +139,6 @@ class HyperOpti:
         optimizer = build_optimizer(self.external_config, model, logger, is_pretrain=True)
 
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.external_config.LOCAL_RANK], broadcast_buffers=False)
-        model_without_ddp = model.module
-
-        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if hasattr(model_without_ddp, 'flops'):
-            flops = model_without_ddp.flops()
 
         lr_scheduler = build_scheduler(self.external_config, optimizer, len(self.data_loader_train))
 
@@ -210,8 +194,8 @@ if __name__ == '__main__':
             hyperopti.configspace,
             walltime_limit=60,  # After 60 seconds, we stop the hyperparameter optimization
             n_trials=500,  # Evaluate max 500 different trials
-            min_budget=1,  # Train the MLP using a hyperparameter configuration for at least 5 epochs
-            max_budget=25,  # Train the MLP using a hyperparameter configuration for at most 25 epochs
+            min_budget=1,  # Train the NN using a hyperparameter configuration for at least 1 epoch
+            max_budget=25,  # Train the NN using a hyperparameter configuration for at most 25 epochs
             n_workers=8,
         )
 
