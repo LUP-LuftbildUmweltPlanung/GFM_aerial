@@ -41,7 +41,7 @@ torch.set_float32_matmul_precision('medium')
 
 
 class HyperOpti:
-    def __init__(self, config):
+    def __init__(self, config, logger):
         config.defrost()
         self.external_config = config
 
@@ -185,9 +185,18 @@ if __name__ == '__main__':
     np.random.seed(seed)
     cudnn.benchmark = True
 
-    hyperopti = HyperOpti()
+    os.makedirs(config.OUTPUT, exist_ok=True)
+    logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
 
-    facades: list[AbstractFacade] = []
+    if dist.get_rank() == 0:
+        path = os.path.join(config.OUTPUT, "config.json")
+        with open(path, "w") as f:
+            f.write(config.dump())
+        logger.info(f"Full config saved to {path}")
+
+    hyperopti = HyperOpti(config, logger)
+
+    facades = []
     for intensifier_object in [SuccessiveHalving, Hyperband]:
         # Define our environment variables
         scenario = Scenario(
@@ -226,14 +235,5 @@ if __name__ == '__main__':
         print(f"Incumbent cost ({intensifier.__class__.__name__}): {incumbent_cost}")
 
         facades.append(smac)
-
-    os.makedirs(config.OUTPUT, exist_ok=True)
-    logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
-
-    if dist.get_rank() == 0:
-        path = os.path.join(config.OUTPUT, "config.json")
-        with open(path, "w") as f:
-            f.write(config.dump())
-        logger.info(f"Full config saved to {path}")
 
 

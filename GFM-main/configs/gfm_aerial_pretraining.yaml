@@ -1,3 +1,5 @@
+# run cmd: /home/malik/miniconda3/envs/gfm-aerial/bin/python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_optimizer.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm --pretrained GFM-main/output/simmim_finetune/gfm.pth
+
 MODEL:
   TYPE: swin
   NAME: gfmaerial_pretrain
@@ -15,14 +17,14 @@ DATA:
   TEACHER_IMG_SIZE: 192 #for gfm, 224 for swin
   MASK_PATCH_SIZE: 32 #number of masked-out areas per image
   MASK_RATIO: 0.6 #masked % of image range [0,1]
-  DATA_TRAIN_PATH: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
-  DATA_VALI_PATH_TEMP_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
-  DATA_VALI_PATH_SPA_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
-  DATA_VALI_PATH_TEMP_SPA_IND: "/home/malik/Projects/GFM_aerial/test_tiles.lmdb"
+  DATA_TRAIN_PATH: "/home/malik/projects/GFM_aerial/files/test_tiles.lmdb"
+  DATA_VALI_PATH_TEMP_IND: "/home/malik/projects/GFM_aerial/files/test_tiles.lmdb"
+  DATA_VALI_PATH_SPA_IND: "/home/malik/projects/GFM_aerial/files/test_tiles.lmdb"
+  DATA_VALI_PATH_TEMP_SPA_IND: "/home/malik/projects/GFM_aerial/files/test_tiles.lmdb"
   OUTPUT_LMDB: None #save reconstructed images when testing
 TRAIN:
-  EPOCHS: 100
-  WARMUP_EPOCHS: 10
+  EPOCHS: 3
+  WARMUP_EPOCHS: 1
   BASE_LR: 2e-4
   WARMUP_LR: 1e-6
   MIN_LR: 1e-5
