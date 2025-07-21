@@ -17,6 +17,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader, DistributedSampler, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torchvision.datasets import ImageFolder
+from torchvision.utils import _log_api_usage_once
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 ######
@@ -29,6 +30,43 @@ import lmdb
 from typing import TypeVar, Optional, Iterator
 ######
 
+class EnsureFourChannelsTensor:
+    """Apply a user-defined lambda as a transform. This transform does not support torchscript.
+
+    Args:
+        lambd (function): Lambda/function to be used for transform.
+    """
+
+    def __init__(self):
+        _log_api_usage_once(self)
+
+    def __call__(self, img):
+        if isinstance(img, torch.Tensor):
+            if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
+                alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
+                img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
+        else:
+            raise NotImplementedError
+        return img
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
+    
+class ScaleTo0to1:
+    """Apply a user-defined lambda as a transform. This transform does not support torchscript.
+
+    Args:
+        lambd (function): Lambda/function to be used for transform.
+    """
+
+    def __init__(self):
+        _log_api_usage_once(self)
+
+    def __call__(self, img):
+        return img / 255.0 if img.max() > 1 else img
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
 
 class MaskGenerator:
     def __init__(self, input_size=192, mask_patch_size=32, model_patch_size=4, mask_ratio=0.6):
@@ -67,10 +105,10 @@ class SimMIMTransform:
                 self.transform_img = bend.build_transform(config, split='train')
             elif data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
+                    EnsureFourChannelsTensor(),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
-                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    T.ToTensor(),
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
@@ -89,8 +127,8 @@ class SimMIMTransform:
 
             if data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: self.ensure_four_channels_tensor(img)),
-                    T.Lambda(lambda img: img / 255.0 if img.max() > 1 else img), #otherwise done with ToTensor()
+                    EnsureFourChannelsTensor(),
+                    T.ToTensor(),
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
@@ -110,18 +148,6 @@ class SimMIMTransform:
             model_patch_size=model_patch_size,
             mask_ratio=config.DATA.MASK_RATIO,
         )
-
-    def ensure_four_channels_tensor(self, img):
-        """
-        Ensures that images of lmdb datasets have four channels.
-        """
-        if isinstance(img, torch.Tensor):
-            if img.shape[0] == 3:  # If there are only 3 channels (C, H, W)
-                alpha_channel = torch.full((1, img.shape[1], img.shape[2]), 0.5, dtype=img.dtype, device=img.device)
-                img = torch.cat([img, alpha_channel], dim=0)  # Add the fourth channel
-        else:
-            raise NotImplementedError
-        return img
 
     def __call__(self, img):
         img = self.transform_img(img)

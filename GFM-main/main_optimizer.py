@@ -44,11 +44,7 @@ class HyperOpti:
     def __init__(self, config, logger):
         config.defrost()
         self.external_config = config
-
-        self.data_loader_train = build_loader(self.external_config, logger, is_pretrain=True, is_train=True)
-        self.data_loader_vali_temp_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=0)
-        self.data_loader_vali_spa_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=1)
-        self.data_loader_vali_temp_spa_ind = build_loader(self.external_config, logger, is_pretrain=True, is_train=False, vali_key=2)
+        self.logger = logger
 
     @property
     def configspace(self) -> ConfigurationSpace:
@@ -112,6 +108,11 @@ class HyperOpti:
         # ALPHA
 
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
+        data_loader_train = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=True)
+        data_loader_vali_temp_ind = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=False, vali_key=0)
+        data_loader_vali_spa_ind = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=False, vali_key=1)
+        data_loader_vali_temp_spa_ind = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=False, vali_key=2)
+
         # self.external_config.value = config["value"]
         self.external_config.MODEL.DROP_RATE = config["drop_rate"]
         self.external_config.DATA.BATCH_SIZE = config["batch_size"]
@@ -123,7 +124,7 @@ class HyperOpti:
         linear_scaled_warmup_lr = self.external_config.TRAIN.WARMUP_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
         linear_scaled_min_lr = self.external_config.TRAIN.MIN_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
         # gradient accumulation also need to scale the learning rate
-        if self.self.external_config.TRAIN.ACCUMULATION_STEPS > 1:
+        if self.external_config.TRAIN.ACCUMULATION_STEPS > 1:
             linear_scaled_lr = linear_scaled_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
             linear_scaled_warmup_lr = linear_scaled_warmup_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
             linear_scaled_min_lr = linear_scaled_min_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
@@ -140,16 +141,16 @@ class HyperOpti:
 
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.external_config.LOCAL_RANK], broadcast_buffers=False)
 
-        lr_scheduler = build_scheduler(self.external_config, optimizer, len(self.data_loader_train))
+        lr_scheduler = build_scheduler(self.external_config, optimizer, len(data_loader_train))
 
         # TODO: adjust epochs based on budget
         for epoch in range(self.external_config.TRAIN.START_EPOCH, self.external_config.TRAIN.EPOCHS):
-            self.data_loader_train.sampler.set_epoch(epoch)
+            data_loader_train.sampler.set_epoch(epoch)
 
-            train_loss = train_one_epoch(self.external_config, model, self.data_loader_train, optimizer, epoch, lr_scheduler)
-            val_loss_temp_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_temp_ind, epoch, val_key="temp_ind")
-            val_loss_spa_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_spa_ind, epoch, val_key="spa_ind")
-            val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, self.data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
+            train_loss = train_one_epoch(self.external_config, model, data_loader_train, optimizer, epoch, lr_scheduler)
+            val_loss_temp_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_ind, epoch, val_key="temp_ind")
+            val_loss_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_spa_ind, epoch, val_key="spa_ind")
+            val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
             avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind + val_loss_temp_spa_ind)/3
 
         # TODO: which loss?
