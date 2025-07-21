@@ -1,0 +1,71 @@
+DATA.BATCH_SIZE; batch_size = Categorical("batch_size", [8, 16, 32, 64, 128, 256, 512], default=128); maybe just maximum for ram?
+DATA.INTERPOLATION; interpolation = Categorical("interpolation", ["random", "bilinear", "bicubic"], default="bicubic")
+DATA.MASK_PATCH_SIZE; mask_patch_size = Integer("mask_patch_size", (1, 100), default=32)
+DATA.MASK_RATIO; mask_ratio = Float("mask_ratio", (0.0, 1.0), default=0.6)
+
+MODEL.DROP_RATE; drop_rate = Float("drop_rate", (0.0, 1.0), default=0.0)
+MODEL.DROP_PATH_RATE; drop_path_rate = Float("drop_path_rate", (0.0, 1.0), default=0.1)
+MODEL.LABEL_SMOOTHING; label_smoothing = Float("label_smoothing", (0.0, 1.0), default=0.1)
+
+TRAIN.WARMUP_EPOCHS; warmup_epochs = 0
+TRAIN.WEIGHT_DECAY; weight_decay = Float("weight_decay", (0.0, 1.0), default=0.05)
+TRAIN.BASE_LR; base_lr = Float("base_lr", (1e-6, 1.0), log=True, default=2e-4)
+TRAIN.WARMUP_LR; warmup_lr = 0.0
+TRAIN.MIN_LR; min_lr = Float("base_lr", (1e-10, 1.0), log=True, default=1e-6); min_lr = base_lr if base_lr > min_lr else min_lr
+TRAIN.CLIP_GRAD; clip_grad = Float("clip_grad", (1.0, 1e10), log=True, default=5.0)
+TRAIN.ACCUMULATION_STEPS; accumulation_steps = 0; needs more research but theoretically just increases batch size (multiplied)
+
+Swin Transformer parameters
+MODEL.SWIN.PATCH_SIZE = 4
+MODEL.SWIN.IN_CHANS = 3
+MODEL.SWIN.EMBED_DIM = 96
+MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
+MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
+MODEL.SWIN.WINDOW_SIZE = 7
+MODEL.SWIN.MLP_RATIO = 4.
+MODEL.SWIN.QKV_BIAS = True
+MODEL.SWIN.QK_SCALE = None
+MODEL.SWIN.APE = False
+MODEL.SWIN.PATCH_NORM = True
+
+# Vision Transformer parameters
+MODEL.VIT.PATCH_SIZE = 16
+MODEL.VIT.IN_CHANS = 3
+MODEL.VIT.EMBED_DIM = 768
+MODEL.VIT.DEPTH = 12
+MODEL.VIT.NUM_HEADS = 12
+MODEL.VIT.MLP_RATIO = 4
+MODEL.VIT.QKV_BIAS = True
+MODEL.VIT.INIT_VALUES = 0.1
+MODEL.VIT.USE_APE = False
+MODEL.VIT.USE_RPB = False
+MODEL.VIT.USE_SHARED_RPB = True
+MODEL.VIT.USE_MEAN_POOLING = False
+
+Suggestion: leave unchanged
+TRAIN.LR_SCHEDULER.NAME;
+TRAIN.LR_SCHEDULER.DECAY_EPOCHS; 
+TRAIN.LR_SCHEDULER.DECAY_RATE; 
+TRAIN.LR_SCHEDULER.GAMMA; 
+TRAIN.LR_SCHEDULER.MULTISTEPS; 
+
+Suggestion: leave unchanged
+TRAIN.OPTIMIZER.NAME;
+TRAIN.OPTIMIZER.EPS; 
+TRAIN.OPTIMIZER.BETAS; 
+TRAIN.OPTIMIZER.MOMENTUM; 
+TRAIN.LAYER_DECAY; 
+
+AUG.COLOR_JITTER; color_jitter = Float("color_jitter", (0.0, 1.0), default=0.4)
+AUG.AUTO_AUGMENT; (what is this?)
+AUG.REPROB; reprob = Float("reprob", (0.0, 1.0), default=0.25)
+AUG.REMODE; ; 'pixel' and... ?
+AUG.RECOUNT; ; which values are valid?
+AUG.MIXUP; mixup = Float("mixup", (0.0, 1.0), default=0.8); original paper said [0.1, 0.4]
+AUG.CUTMIX; cutmix = Float("cutmix", (0.0, 1.0), default=1.0); original paper just uses 1.0 (uniform sampling)
+AUG.CUTMIX_MINMAX; None; sets the lambda sampled from the beta distribution to a fixed value (0, 1)
+AUG.MIXUP_PROB; mixup_prob = Float("mixup_prob", (0.0, 1.0), default=1.0)
+AUG.MIXUP_SWITCH_PROB; mixup_switch_prob = Float("mixup_switch_prob", (0.0, 1.0), default=0.5)
+AUG.MIXUP_MODE; mixup_mode = Categorical("mixup_mode", ["batch", "pair", "elem"], default="batch")
+
+AMP_OPT_LEVEL; ; used for mixed precision, maybe to complex to get running (could ask vera)
