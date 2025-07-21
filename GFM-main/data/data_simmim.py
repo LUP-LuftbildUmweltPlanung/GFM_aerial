@@ -31,11 +31,8 @@ from typing import TypeVar, Optional, Iterator
 ######
 
 class EnsureFourChannelsTensor:
-    """Apply a user-defined lambda as a transform. This transform does not support torchscript.
-
-    Args:
-        lambd (function): Lambda/function to be used for transform.
-    """
+    """Returns a four channel image by adding a fourth channel initialized as 0.5 for a 3-channel image or 
+    returning the original 4-channel image. Raises an error otherwise."""
 
     def __init__(self):
         _log_api_usage_once(self)
@@ -52,18 +49,14 @@ class EnsureFourChannelsTensor:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
     
-class ScaleTo0to1:
-    """Apply a user-defined lambda as a transform. This transform does not support torchscript.
-
-    Args:
-        lambd (function): Lambda/function to be used for transform.
-    """
+class EnsureRGBA:
+    """Converts the image to RGBA if the image is not RGBA. Otherwise just returns the image."""
 
     def __init__(self):
         _log_api_usage_once(self)
 
     def __call__(self, img):
-        return img / 255.0 if img.max() > 1 else img
+        return img.convert('RGBA') if img.mode != 'RGBA' else img
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -114,7 +107,7 @@ class SimMIMTransform:
                 ])
             elif 'GeoPileV0' in data_path and not data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
-                    T.Lambda(lambda img: img.convert('RGBA') if img.mode != 'RGBA' else img),
+                    EnsureRGBA(),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
                     T.ToTensor(),
