@@ -1,7 +1,6 @@
 name: gfm-smac
 channels:
   - pytorch
-  - nvidia
   - conda-forge
   - defaults
 dependencies:
@@ -17,7 +16,6 @@ dependencies:
   - certifi=2024.8.30=py38h06a4308_0
   - cffi=1.17.0=py38heb5c249_0
   - charset-normalizer=3.3.2=pyhd3eb1b0_0
-  - cuda-nvcc=12.4.131=0
   - cuda-version=11.3=hbc958af_3
   - cudatoolkit=11.3.1=h2bc3f7f_2
   - cudnn=8.9.7.29=hbc23b4c_3
@@ -104,7 +102,6 @@ dependencies:
       - aiosignal==1.3.1
       - alembic==1.14.1
       - anyio==4.5.2
-      - apex==0.1
       - arrow==1.3.0
       - async-timeout==5.0.1
       - attrs==25.1.0
@@ -253,4 +250,4 @@ dependencies:
       - yarl==1.15.2
       - zict==3.0.0
       - zipp==3.20.2
-prefix: /home/malik/programs/anaconda3/envs/gfm-aerial
+prefix: /home/embedding/miniconda3/envs/gfm-smac

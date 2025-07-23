@@ -269,7 +269,7 @@ def train_on_image_extract(model, x_rgbi, mask, new_size=192):
     else:
         raise NotImplementedError
 
-def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
+def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, logger):
     """
     Perform one epoch of training.
     """
@@ -402,7 +402,7 @@ def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler):
 
 
 @torch.no_grad()
-def validate_one_epoch(config, model, data_loader, epoch, val_key="spa_ind"):
+def validate_one_epoch(config, model, data_loader, epoch, logger, val_key="spa_ind"):
     """
     Validate the model after training one epoch on one validation dataset.
 

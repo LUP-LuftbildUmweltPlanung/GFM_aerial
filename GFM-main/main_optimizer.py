@@ -4,6 +4,7 @@
 # --------------------------------------------------------
 
 import os
+import gc
 import numpy as np
 
 from ConfigSpace import (
@@ -39,7 +40,6 @@ from main_teacher import train_one_epoch, validate_one_epoch, parse_option
 # Optimize PyTorch precision
 torch.set_float32_matmul_precision('medium')
 
-
 class HyperOpti:
     def __init__(self, config, logger):
         config.defrost()
@@ -61,51 +61,6 @@ class HyperOpti:
         cs.add([drop_rate, batch_size, weight_decay, base_lr])
 
         return cs
-        # TODO update config here using trial object
-        # relevant:
-        # DATA.BATCH_SIZE
-        # DATA.INTERPOLATION 
-        # DATA.MASK_PATCH_SIZE
-        # DATA.MASK_RATIO
-        #
-        # MODEL.DROP_RATE
-        # MODEL.DROP_PATH_RATE
-        # MODEL.LABEL_SMOOTHING
-        # 
-        # TRAIN.WARMUP_EPOCHS
-        # TRAIN.WEIGHT_DECAY
-        # TRAIN.BASE_LR
-        # TRAIN.WARMUP_LR
-        # TRAIN.MIN_LR
-        # TRAIN.CLIP_GRAD
-        # TRAIN.ACCUMULATION_STEPS
-        # TRAIN.LR_SCHEDULER.NAME
-        # TRAIN.LR_SCHEDULER.DECAY_EPOCHS
-        # TRAIN.LR_SCHEDULER.DECAY_RATE
-        # TRAIN.LR_SCHEDULER.GAMMA
-        # TRAIN.LR_SCHEDULER.MULTISTEPS
-        # TRAIN.OPTIMIZER.NAME (maybe not relevant if we stick to adamw)
-        # TRAIN.OPTIMIZER.EPS
-        # TRAIN.OPTIMIZER.BETAS
-        # TRAIN.OPTIMIZER.MOMENTUM
-        # TRAIN.LAYER_DECAY
-        # 
-        # AUG.COLOR_JITTER
-        # AUG.AUTO_AUGMENT (what is this?)
-        # AUG.REPROB
-        # AUG.REMODE
-        # AUG.RECOUNT
-        # AUG.MIXUP
-        # AUG.CUTMIX
-        # AUG.CUTMIX_MINMAX
-        # AUG.MIXUP_PROB
-        # AUG.MIXUP_SWITCH_PROB
-        # AUG.MIXUP_MODE
-        #
-        # AMP_OPT_LEVEL (relevant?)
-        # _C.TRAIN_FRAC
-        # NO_VAL
-        # ALPHA
 
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
         data_loader_train = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=True)
@@ -113,7 +68,8 @@ class HyperOpti:
         data_loader_vali_spa_ind = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=False, vali_key=1)
         data_loader_vali_temp_spa_ind = build_loader(self.external_config, self.logger, is_pretrain=True, is_train=False, vali_key=2)
 
-        # self.external_config.value = config["value"]
+        self.external_config.defrost()
+        self.external_config.AMP_OPT_LEVEL= "O0"
         self.external_config.MODEL.DROP_RATE = config["drop_rate"]
         self.external_config.DATA.BATCH_SIZE = config["batch_size"]
         self.external_config.TRAIN.WEIGHT_DECAY = config["weight_decay"]
@@ -128,7 +84,6 @@ class HyperOpti:
             linear_scaled_lr = linear_scaled_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
             linear_scaled_warmup_lr = linear_scaled_warmup_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
             linear_scaled_min_lr = linear_scaled_min_lr * self.external_config.TRAIN.ACCUMULATION_STEPS
-            self.external_config.defrost()
         self.external_config.TRAIN.BASE_LR = linear_scaled_lr
         self.external_config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
         self.external_config.TRAIN.MIN_LR = linear_scaled_min_lr
@@ -143,15 +98,26 @@ class HyperOpti:
 
         lr_scheduler = build_scheduler(self.external_config, optimizer, len(data_loader_train))
 
-        # TODO: adjust epochs based on budget
-        for epoch in range(self.external_config.TRAIN.START_EPOCH, self.external_config.TRAIN.EPOCHS):
+        print(torch.cuda.memory_summary(device=None, abbreviated=False))
+
+        for epoch in range(0, int(np.ceil(budget))):
             data_loader_train.sampler.set_epoch(epoch)
 
-            train_loss = train_one_epoch(self.external_config, model, data_loader_train, optimizer, epoch, lr_scheduler)
-            val_loss_temp_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_ind, epoch, val_key="temp_ind")
-            val_loss_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_spa_ind, epoch, val_key="spa_ind")
-            val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_spa_ind, epoch, val_key="temp_spa_ind")
-            avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind + val_loss_temp_spa_ind)/3
+            train_loss = train_one_epoch(self.external_config, model, data_loader_train, optimizer, epoch, lr_scheduler, logger)
+        val_loss_temp_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_ind, epoch, logger, val_key="temp_ind")
+        val_loss_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_spa_ind, epoch, logger, val_key="spa_ind")
+        val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_spa_ind, epoch, logger, val_key="temp_spa_ind")
+        avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind + val_loss_temp_spa_ind)/3
+
+        del model
+        del lr_scheduler
+        del data_loader_train
+        del data_loader_vali_temp_ind
+        del data_loader_vali_spa_ind
+        del data_loader_vali_temp_spa_ind 
+        gc.collect()
+        with torch.no_grad():
+            torch.cuda.empty_cache()
 
         # TODO: which loss?
         
@@ -187,7 +153,7 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     os.makedirs(config.OUTPUT, exist_ok=True)
-    logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
+    logger = create_logger(output_dir=config.OUTPUT, dist_rank=1, name=f"{config.MODEL.NAME}")
 
     if dist.get_rank() == 0:
         path = os.path.join(config.OUTPUT, "config.json")
@@ -202,11 +168,11 @@ if __name__ == '__main__':
         # Define our environment variables
         scenario = Scenario(
             hyperopti.configspace,
-            walltime_limit=60,  # After 60 seconds, we stop the hyperparameter optimization
-            n_trials=500,  # Evaluate max 500 different trials
+            walltime_limit=30,  # After 60 seconds, we stop the hyperparameter optimization
+            n_trials=5,  # Evaluate max 500 different trials
             min_budget=1,  # Train the NN using a hyperparameter configuration for at least 1 epoch
-            max_budget=25,  # Train the NN using a hyperparameter configuration for at most 25 epochs
-            n_workers=8,
+            max_budget=5,  # Train the NN using a hyperparameter configuration for at most 25 epochs
+            n_workers=1,
         )
 
         # We want to run five random configurations before starting the optimization.

@@ -60,6 +60,18 @@ class EnsureRGBA:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+    
+class EnsureRange:
+    """Divides the image by 255 if not already scaled from 0 to 1."""
+
+    def __init__(self):
+        _log_api_usage_once(self)
+
+    def __call__(self, img):
+        return img / 255.0 if img.max() > 1 else img
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
 
 class MaskGenerator:
     def __init__(self, input_size=192, mask_patch_size=32, model_patch_size=4, mask_ratio=0.6):
@@ -101,7 +113,7 @@ class SimMIMTransform:
                     EnsureFourChannelsTensor(),
                     T.RandomResizedCrop(config.DATA.IMG_SIZE, scale=(0.67, 1.), ratio=(3. / 4., 4. / 3.)),
                     T.RandomHorizontalFlip(),
-                    T.ToTensor(),
+                    EnsureRange(), #otherwise done with ToTensor()
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
@@ -121,7 +133,7 @@ class SimMIMTransform:
             if data_path.endswith(".lmdb"):
                 self.transform_img = T.Compose([
                     EnsureFourChannelsTensor(),
-                    T.ToTensor(),
+                    EnsureRange(), #otherwise done with ToTensor()
                     T.Normalize(mean=torch.tensor(list(IMAGENET_DEFAULT_MEAN) + [0.5947974324226379]),
                                 std=torch.tensor(list(IMAGENET_DEFAULT_STD) + [0.19213160872459412])),
                 ])
