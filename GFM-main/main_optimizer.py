@@ -53,7 +53,7 @@ class HyperOpti:
         cs = ConfigurationSpace()
 
         drop_rate = Float("drop_rate", (0.0, 1.0), default=0.0)
-        batch_size = Integer("batch_size", (60, 200), default=128)
+        batch_size = Categorical("batch_size", (4, 8, 16, 32), default=8)
         weight_decay = Float("weight_decay", (0.0, 1.0), default=0.05)
         base_lr = Float("base_lr", (0.00001, 1.0), default=2e-4, log=True)
 
@@ -71,9 +71,10 @@ class HyperOpti:
         self.external_config.defrost()
         self.external_config.AMP_OPT_LEVEL= "O0"
         self.external_config.MODEL.DROP_RATE = config["drop_rate"]
-        self.external_config.DATA.BATCH_SIZE = config["batch_size"]
+        self.external_config.DATA.BATCH_SIZE = int(config["batch_size"])
         self.external_config.TRAIN.WEIGHT_DECAY = config["weight_decay"]
         self.external_config.TRAIN.BASE_LR = config["base_lr"]
+        self.external_config.TRAIN.EPOCHS = budget
 
         # linear scale the learning rate according to total batch size, may not be optimal
         linear_scaled_lr = self.external_config.TRAIN.BASE_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
@@ -109,23 +110,9 @@ class HyperOpti:
         val_loss_temp_spa_ind = validate_one_epoch(self.external_config, model, data_loader_vali_temp_spa_ind, epoch, logger, val_key="temp_spa_ind")
         avg_val_loss = (val_loss_temp_ind + val_loss_spa_ind + val_loss_temp_spa_ind)/3
 
-        del model
-        del lr_scheduler
-        del data_loader_train
-        del data_loader_vali_temp_ind
-        del data_loader_vali_spa_ind
-        del data_loader_vali_temp_spa_ind 
-        gc.collect()
-        with torch.no_grad():
-            torch.cuda.empty_cache()
-
         # TODO: which loss?
         
         return avg_val_loss
-    
-    def optimize(self):
-        pass
-
 
 if __name__ == '__main__':
     _, config = parse_option()
@@ -168,10 +155,10 @@ if __name__ == '__main__':
         # Define our environment variables
         scenario = Scenario(
             hyperopti.configspace,
-            walltime_limit=30,  # After 60 seconds, we stop the hyperparameter optimization
+            walltime_limit=600,  # After 60 seconds, we stop the hyperparameter optimization
             n_trials=5,  # Evaluate max 500 different trials
             min_budget=1,  # Train the NN using a hyperparameter configuration for at least 1 epoch
-            max_budget=5,  # Train the NN using a hyperparameter configuration for at most 25 epochs
+            max_budget=3,  # Train the NN using a hyperparameter configuration for at most 3 epochs
             n_workers=1,
         )
 

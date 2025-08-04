@@ -1,4 +1,4 @@
-# run cmd: /home/malik/miniconda3/envs/gfm-aerial/bin/python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_optimizer.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --batch-size 32 --tag gfm --pretrained GFM-main/output/simmim_finetune/gfm.pth
+# run cmd: /home/malik/miniconda3/envs/gfm-smac/bin/python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_optimizer.py --cfg GFM-main/configs/gfm_aerial_pretraining.yaml --tag gfm --pretrained GFM-main/output/simmim_finetune/gfm.pth
 
 MODEL:
   TYPE: swin
