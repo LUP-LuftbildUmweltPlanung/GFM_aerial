@@ -52,13 +52,16 @@ class HyperOpti:
         # To illustrate different parameter types, we use continuous, integer and categorical parameters.
         cs = ConfigurationSpace()
 
-        drop_rate = Float("drop_rate", (0.0, 1.0), default=0.0)
-        batch_size = Categorical("batch_size", (4, 8, 16, 32), default=8)
-        weight_decay = Float("weight_decay", (0.0, 1.0), default=0.05)
+        img_size = Categorical("img_size", (192, 224, 256, 288, 310, 342, 374), default=192)
+        mask_patch_size = Categorical("mask_patch_size", (4, 8, 16, 32, 64), default=32)
+        model_patch_size = Categorical("model_patch_size", (2, 4, 8), default=4)
+        mask_ratio = Float("batch_size", (0.1, 1.0), default=0.6)
         base_lr = Float("base_lr", (0.00001, 1.0), default=2e-4, log=True)
+        batch_size = Categorical("batch_size", (4, 8, 16, 32), default=8)
+        clip_grad = Categorical("clip_grad", (1, 3, 5, 8, 10, 25), default=5)
 
         # Add all hyperparameters at once:
-        cs.add([drop_rate, batch_size, weight_decay, base_lr])
+        cs.add([img_size, mask_patch_size, model_patch_size, mask_ratio, base_lr, batch_size, clip_grad])
 
         return cs
 
@@ -70,11 +73,14 @@ class HyperOpti:
 
         self.external_config.defrost()
         self.external_config.AMP_OPT_LEVEL= "O0"
-        self.external_config.MODEL.DROP_RATE = config["drop_rate"]
-        self.external_config.DATA.BATCH_SIZE = int(config["batch_size"])
-        self.external_config.TRAIN.WEIGHT_DECAY = config["weight_decay"]
+        self.external_config.TRAIN.WARMUP_EPOCHS = 1
+        self.external_config.DATA.IMG_SIZE = config["img_size"]
+        self.external_config.DATA.MASK_PATCH_SIZE = config["mask_patch_size"]
+        self.external_config.MODEL.SWIN.PATCH_SIZE = config["model_patch_size"]
+        self.external_config.DATA.MASK_RATIO = config["mask_ratio"]
         self.external_config.TRAIN.BASE_LR = config["base_lr"]
-        self.external_config.TRAIN.EPOCHS = budget
+        self.external_config.DATA.BATCH_SIZE = config["batch_size"]
+        self.external_config.TRAIN.CLIP_GRAD = config["clip_grad"]
 
         # linear scale the learning rate according to total batch size, may not be optimal
         linear_scaled_lr = self.external_config.TRAIN.BASE_LR * self.external_config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
@@ -155,10 +161,8 @@ if __name__ == '__main__':
         # Define our environment variables
         scenario = Scenario(
             hyperopti.configspace,
-            walltime_limit=600,  # After 60 seconds, we stop the hyperparameter optimization
-            n_trials=5,  # Evaluate max 500 different trials
-            min_budget=1,  # Train the NN using a hyperparameter configuration for at least 1 epoch
-            max_budget=3,  # Train the NN using a hyperparameter configuration for at most 3 epochs
+            min_budget=3,  # Train the NN using a hyperparameter configuration for at least 1 epoch
+            max_budget=50,  # Train the NN using a hyperparameter configuration for at most 3 epochs
             n_workers=1,
         )
 
