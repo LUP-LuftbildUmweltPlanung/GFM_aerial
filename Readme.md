@@ -21,9 +21,6 @@ conda env create -f environment.yml
 conda activate gfm-aerial
 cd ../GFM-main/git_reps/
 git clone https://github.com/microsoft/SimMIM
-git clone https://github.com/NVIDIA/apex
-cd apex
-pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 ```
 
 ### Logging with MLflow
@@ -83,10 +80,9 @@ output
    |- simmim_pretrain
       |- gfm.pth
 ```
-An example command for finetuning is as follows:
+An example command for finetuning for Classification using GFM-aerial and an RGBI dataset:
 ```bash
-python -m torch.distributed.launch --nproc_per_node 4 main_finetune.py --cfg configs/finetune.yaml --batch-size 128 \
---data-path /path/to/bigearthnet/ --pretrained output/simmim_pretrain/gfm.pth --tag RGBI --train_frac 0.01
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_finetune.py --cfg GFM-main/configs/finetune.yaml --batch-size 32 --pretrained GFM-main/output/simmim_pretrain/gfmaerial_192imgsize_gfm_teacher_ckpt_epoch_97_new_best.pth --tag rgbi_ft
 ```
 
 ## Authors

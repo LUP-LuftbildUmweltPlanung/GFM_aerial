@@ -67,7 +67,7 @@ def parse_option():
     parser.add_argument('--train_frac', type=float, default=1.0, help="fraction of training data")
 
     # distributed training
-    parser.add_argument("--local-rank", type=int, required=True, help='local rank for DistributedDataParallel')
+    parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
 
     args = parser.parse_args()
 

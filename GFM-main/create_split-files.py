@@ -1,7 +1,7 @@
 import random
 import pathlib
 
-root = pathlib.Path(r"/home/embedding/Data_Center/Vera/Finetuning_datasets/4_band_test/Images/") #end with /Images
+root = pathlib.Path(r"/home/embedding/Data_Center/Vera/Finetuning_datasets/4_bands/Images/") #end with /Images
 
 train, val, test = [], [], []
 

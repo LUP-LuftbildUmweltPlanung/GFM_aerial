@@ -8,7 +8,7 @@ import torchvision.transforms as T
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.data.transforms import str_to_pil_interp
 
-from data_simmim import ensure_four_channels_tensor
+from data.data_simmim import ensure_four_channels_tensor
 
 import rasterio
 
