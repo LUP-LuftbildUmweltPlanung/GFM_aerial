@@ -76,6 +76,19 @@ python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_testing.py -
 ```
 If you want to save the reconstructed images in an lmdb file, add a path to the OUTPUT_LMDB variable of your yaml file.
 
+## Finetuning
+To perform finetuning, place the GFM/GFM-aerial pretrained model in the following folder structure.
+```
+output
+   |- simmim_pretrain
+      |- gfm.pth
+```
+An example command for finetuning is as follows:
+```bash
+python -m torch.distributed.launch --nproc_per_node 4 main_finetune.py --cfg configs/finetune.yaml --batch-size 128 \
+--data-path /path/to/bigearthnet/ --pretrained output/simmim_pretrain/gfm.pth --tag RGBI --train_frac 0.01
+```
+
 ## Authors
 
 Vera Sons

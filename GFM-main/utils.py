@@ -11,14 +11,20 @@ from scipy import interpolate
 
 import csv
 
-try:
-    # noinspection PyUnresolvedReferences
-    from apex import amp
-except ImportError:
-    amp = None
+from torch.cuda.amp import autocast, GradScaler
 
+#Old:
+# try:
+#     # noinspection PyUnresolvedReferences
+#     from apex import amp
+# except ImportError:
+#     amp = None
 
-def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
+#Old:
+# def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
+# New:
+def load_checkpoint(config, model, optimizer, lr_scheduler, scaler, logger):
+    # end new
     logger.info(f">>>>>>>>>> Resuming from {config.MODEL.RESUME} ..........")
     if config.MODEL.RESUME.startswith('https'):
         checkpoint = torch.hub.load_state_dict_from_url(
@@ -34,8 +40,16 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
         config.defrost()
         config.TRAIN.START_EPOCH = checkpoint['epoch'] + 1
         config.freeze()
-        if 'amp' in checkpoint and config.AMP_OPT_LEVEL != "O0" and checkpoint['config'].AMP_OPT_LEVEL != "O0":
-            amp.load_state_dict(checkpoint['amp'])
+        # Old:
+        # if 'amp' in checkpoint and config.AMP_OPT_LEVEL != "O0" and checkpoint['config'].AMP_OPT_LEVEL != "O0":
+        #    amp.load_state_dict(checkpoint['amp'])
+        # New:
+        if 'scaler' in checkpoint and scaler is not None:
+            scaler.load_state_dict(checkpoint['scaler'])
+        else:
+            print("No Pytorch AMP scaler in checkpoint, starting AMP scaler from scratch.")
+        # end new
+
         logger.info(f"=> loaded successfully '{config.MODEL.RESUME}' (epoch {checkpoint['epoch']})")
         if 'max_accuracy' in checkpoint:
             max_accuracy = checkpoint['max_accuracy']
@@ -44,8 +58,11 @@ def load_checkpoint(config, model, optimizer, lr_scheduler, logger):
     torch.cuda.empty_cache()
     return max_accuracy
 
-
-def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger, train_loss=None, avg_val_loss=None, new_best_key=False):
+#Old:
+# def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, logger, train_loss=None, avg_val_loss=None, new_best_key=False):
+#New:
+def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler, scaler, logger, train_loss=None, avg_val_loss=None, new_best_key=False):
+    # end New
     save_state = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'lr_scheduler': lr_scheduler.state_dict(),
@@ -55,7 +72,10 @@ def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler,
                   'train_loss': train_loss,
                   'avg_val_loss': avg_val_loss}
     if config.AMP_OPT_LEVEL != "O0":
-        save_state['amp'] = amp.state_dict()
+        # Old:
+        # save_state['amp'] = amp.state_dict()
+        # New:
+        save_state['scaler'] = scaler.state_dict()
 
 
     new_best = "_new_best" if new_best_key else ""

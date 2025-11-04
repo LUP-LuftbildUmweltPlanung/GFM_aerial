@@ -13,13 +13,14 @@ from timm.data import create_transform
 from timm.data.transforms import str_to_pil_interp
 import data.ben_data as bend
 import data.ucmerced as merd
+import data.rgbi_data as rgbi_data
 
 
 def build_loader_finetune(config, logger):
     config.defrost()
-    dataset_train, config.MODEL.NUM_CLASSES = build_dataset(is_train=True, config=config, logger=logger)
+    dataset_train, config.MODEL.NUM_CLASSES = build_dataset(config=config, logger=logger)
     config.freeze()
-    dataset_val, _ = build_dataset(is_train=False, config=config, logger=logger)
+    dataset_val, _ = build_dataset(config=config, logger=logger, is_train=False)
     logger.info(f"Build dataset: train images = {len(dataset_train)}, val images = {len(dataset_val)}")
 
     num_tasks = dist.get_world_size()
@@ -59,27 +60,42 @@ def build_loader_finetune(config, logger):
     return dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn
 
 
-def build_dataset(is_train, config, logger):
-    if 'bigearthnet' in config.DATA.DATA_PATH:
+def build_dataset(config, logger, is_train=True, vali_key=0):
+    if is_train:
+        data_path = config.DATA.DATA_TRAIN_PATH
+    else:
+        data_path = config.DATA.DATA_VALI_PATH[vali_key]
+    if 'bigearthnet' in data_path:
         prefix = 'train' if is_train else 'val'
         transform = bend.build_transform(config, split=prefix)
         nb_classes = 19
-        dataset = bend.Bigearthnet(config.DATA.DATA_PATH, split=prefix, img_size=config.DATA.IMG_SIZE,
+        dataset = bend.Bigearthnet(data_path, split=prefix, img_size=config.DATA.IMG_SIZE,
                         bands=config.MODEL.SWIN.IN_CHANS, transform=transform)
         if config.TRAIN_FRAC < 1.0 and prefix=='train':
             dataset = bend.random_subset(dataset, config.TRAIN_FRAC, 42)
-    elif 'merced' in config.DATA.DATA_PATH.lower():
+    #elif 'merced' in data_path.lower():
+    elif config.DATA.DATASET == 'UCMerced':
+        print("UCMerced dataset")
         prefix = 'train' if is_train else 'val'
         transform = merd.build_transform(config, split=prefix)
-        nb_classes = 21
-        dataset = merd.UCMerced(config.DATA.DATA_PATH, split=prefix, transform=transform, download=True)
+        nb_classes = len(config.DATA.CLASSES)
+        dataset = merd.UCMerced(data_path, split=prefix, transform=transform, download=True)
+        #dataset = merd.UCMerced(data_path, split=prefix, transform=transform)
         if config.TRAIN_FRAC < 1.0 and prefix=='train':
+            dataset = bend.random_subset(dataset, config.TRAIN_FRAC, 42)
+    elif config.DATA.DATASET == 'RGBI':
+        print("RGBI dataset")
+        prefix = 'train' if is_train else 'val'
+        transform = rgbi_data.build_transform(config, split=prefix)
+        nb_classes = len(config.DATA.CLASSES)
+        dataset = rgbi_data.RGBI_dataset(config.DATA.CLASSES, data_path, split=prefix, transform=transform)
+        if config.TRAIN_FRAC < 1.0 and prefix == 'train':
             dataset = bend.random_subset(dataset, config.TRAIN_FRAC, 42)
     elif config.DATA.DATASET == 'imagenet':
         transform = build_transform(is_train, config)
         logger.info(f'Fine-tune data transform, is_train={is_train}:\n{transform}')
         prefix = 'train' if is_train else 'val'
-        root = os.path.join(config.DATA.DATA_PATH, prefix)
+        root = os.path.join(data_path, prefix)
         dataset = datasets.ImageFolder(root, transform=transform)
         nb_classes = 1000
     else:
@@ -89,6 +105,8 @@ def build_dataset(is_train, config, logger):
 
 
 def build_transform(is_train, config):
+    print("test")
+    exit()
     resize_im = config.DATA.IMG_SIZE > 32
     if is_train:
         # this should always dispatch to transforms_imagenet_train

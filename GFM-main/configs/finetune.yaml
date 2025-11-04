@@ -1,0 +1,26 @@
+MODEL:
+  TYPE: swin
+  NAME: finetune_gfm-aerial
+  DROP_PATH_RATE: 0.1
+  SWIN:
+    EMBED_DIM: 128
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 4, 8, 16, 32 ]
+    WINDOW_SIZE: 6 # 4 for UCMerced
+    IN_CHANS: 4 # 3 for UCMerced
+DATA:
+  IMG_SIZE: 192 # 128 for UCMerced
+  DATASET: RGBI # UCMerced
+  N_CLASSES: 7 # 21 for UCMerced
+  DATA_TRAIN_PATH: "PATH"
+TRAIN:
+  EPOCHS: 10
+  WARMUP_EPOCHS: 1
+  BASE_LR: 1.0e-4
+  WARMUP_LR: 1.0e-7
+  MIN_LR: 1.0e-5
+  WEIGHT_DECAY: 0.05
+  LAYER_DECAY: 0.9
+PRINT_FREQ: 100
+SAVE_FREQ: 5
+TAG: finetune_gfm-aerial

@@ -26,6 +26,8 @@ _C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
 _C.DATA.OUTPUT_LMDB = None
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
+# Number of classes
+_C.DATA.CLASSES = ["Agrar", "Berg", "Heide", "Uebergang", "Urban", "Wald", "Wasser"]
 # Input image size
 _C.DATA.IMG_SIZE = 384 #192 #224
 _C.DATA.TEACHER_IMG_SIZE = 192 #New
@@ -270,7 +272,7 @@ def update_config(config, args):
     # output folder
     config.OUTPUT = os.path.join(config.OUTPUT, config.MODEL.NAME, config.TAG)
 
-    # output stats folder
+    # output stats_1 folder
     config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats")
 
     config.freeze()
