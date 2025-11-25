@@ -295,11 +295,12 @@ def save_in_lmdb_mask(db, x_reconstructed, key):
     """
 
     for i in range(len(key)):
-        # img shape: (B, 4, H, W)
+        #### uncomment respective part for image or mask visualization ####
+        ## image shape: (B, 4, H, W)
         #img_inv = inverse_normalize(x_reconstructed[i])
         #img_inv = (img_inv * 255.0).clamp(0, 255).to(torch.uint8)
 
-        #### visualize mask:
+        ## mask:
         img_inv = x_reconstructed[i].to(torch.uint8)
 
         bands_dict = {}
