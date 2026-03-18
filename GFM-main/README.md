@@ -48,7 +48,7 @@ output
 ```
 An example command for finetuning is as follows:
 ```bash
-python -m torch.distributed.launch --nproc_per_node 4 main_finetune.py --cfg configs/BEN.yaml --batch-size 128 \
+python -m torch.distributed.launch --nproc_per_node 4 main_finetune_classification.py --cfg configs/BEN.yaml --batch-size 128 \
 --data-path /path/to/bigearthnet/ --pretrained output/simmim_pretrain/gfm.pth --tag BEN --train_frac 0.01
 ```
 ## Citation

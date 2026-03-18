@@ -48,7 +48,7 @@ class RGBI_dataset(NonGeoClassificationDataset):
         self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)} # ToDo:adapt for subset of all classes, make one-hot-encoded
 
         valid_fns = set()
-        with open(os.path.join(self.root, f"4-band-{split}.txt")) as f:
+        with open(os.path.join(self.root, f"{split}.txt")) as f:
             for fn in f:
                 fn_strip = fn.strip()
                 if os.path.exists(fn_strip):

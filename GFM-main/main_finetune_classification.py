@@ -24,19 +24,9 @@ from optimizer import build_optimizer
 from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, get_grad_norm, auto_resume_helper, reduce_tensor
 
-####
-# from sklearn.metrics import average_precision_score
 from torchmetrics import AveragePrecision
-####
 
 from torch.cuda.amp import autocast, GradScaler
-
-#Old:
-# try:
-#     # noinspection PyUnresolvedReferences
-#     from apex import amp
-# except ImportError:
-#     amp = None
 
 
 def parse_option():
@@ -67,7 +57,7 @@ def parse_option():
     parser.add_argument('--train_frac', type=float, default=1.0, help="fraction of training data")
 
     # distributed training
-    parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
+    parser.add_argument("--local-rank", type=int, required=True, help='local rank for DistributedDataParallel')
 
     args = parser.parse_args()
 
@@ -86,13 +76,9 @@ def main(config):
 
     optimizer = build_optimizer(config, model, logger, is_pretrain=False)
     if config.AMP_OPT_LEVEL != "O0":
-        # Old:
-        # model, optimizer = amp.initialize(model, optimizer, opt_level=config.AMP_OPT_LEVEL)
-        # New:
         scaler = GradScaler()
     else:
         scaler = None
-    # end new
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
     model_without_ddp = model.module
 
@@ -129,11 +115,7 @@ def main(config):
             logger.info(f'no checkpoint found in {config.OUTPUT}, ignoring auto resume')
 
     if config.MODEL.RESUME:
-        # Old:
-        #max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, logger)
-        # New:
         max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, scaler, logger)
-        # end New
         acc1, acc5, loss = validate(config, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} validation images: {acc1:.1f}%")
         if config.EVAL_MODE:
@@ -151,19 +133,11 @@ def main(config):
     start_time = time.time()
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
-        #Old:
-        #train_loss = train_one_epoch(config, model, data_loader_train, optimizer, epoch, lr_scheduler)
-        #New:
         train_one_epoch(config, model, criterion, data_loader_train, optimizer, epoch, mixup_fn, lr_scheduler, scaler)
-        # end new
         acc1, acc5, loss = validate(config, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} validation images: {acc1:.1f}%")
         if dist.get_rank() == 0 and (acc1 > max_accuracy):
-            #Old:
-            # save_checkpoint(config, 'max', model_without_ddp, max_accuracy, optimizer, lr_scheduler, logger)
-            # New:
             save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, lr_scheduler, scaler, logger)
-            #end new
             max_accuracy = max(max_accuracy, acc1)
             logger.info(f'Max accuracy: {max_accuracy:.2f}%')
 
@@ -171,11 +145,7 @@ def main(config):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     logger.info('Training time {}'.format(total_time_str))
 
-# Old:
-# def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mixup_fn, lr_scheduler):
-# New:
 def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, scaler):
-    # end new
     model.train()
     optimizer.zero_grad()
     
@@ -195,9 +165,6 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        # Old:
-        #outputs = model(samples)
-        # New:
         if config.AMP_OPT_LEVEL != "O0":
             with autocast():
                 outputs = model(samples)
@@ -207,23 +174,6 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
             loss = criterion(outputs, targets)
 
         if config.TRAIN.ACCUMULATION_STEPS > 1:
-            #Old:
-            # loss = criterion(outputs, targets)
-            # loss = loss / config.TRAIN.ACCUMULATION_STEPS
-            # if config.AMP_OPT_LEVEL != "O0":
-            #     with amp.scale_loss(loss, optimizer) as scaled_loss:
-            #         scaled_loss.backward()
-            #     if config.TRAIN.CLIP_GRAD:
-            #         grad_norm = torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), config.TRAIN.CLIP_GRAD)
-            #     else:
-            #         grad_norm = get_grad_norm(amp.master_params(optimizer))
-            # else:
-            #     loss.backward()
-            #     if config.TRAIN.CLIP_GRAD:
-            #         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.TRAIN.CLIP_GRAD)
-            #     else:
-            #         grad_norm = get_grad_norm(model.parameters())
-            #New:
             if config.AMP_OPT_LEVEL != "O0":
                 with autocast():
                     loss = loss / config.TRAIN.ACCUMULATION_STEPS
@@ -236,29 +186,12 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.TRAIN.CLIP_GRAD)
             else:
                 grad_norm = get_grad_norm(model.parameters())
-            #end new
             if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step_update(epoch * num_steps + idx)
         else:
             optimizer.zero_grad()
-            # Old:
-            # if config.AMP_OPT_LEVEL != "O0":
-            #     with amp.scale_loss(loss, optimizer) as scaled_loss:
-            #         scaled_loss.backward()
-            #     if config.TRAIN.CLIP_GRAD:
-            #         grad_norm = torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), config.TRAIN.CLIP_GRAD)
-            #     else:
-            #         grad_norm = get_grad_norm(amp.master_params(optimizer))
-            # else:
-            #     loss.backward()
-            #     if config.TRAIN.CLIP_GRAD:
-            #         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.TRAIN.CLIP_GRAD)
-            #     else:
-            #         grad_norm = get_grad_norm(model.parameters())
-            # New:
-
             if config.AMP_OPT_LEVEL != "O0":
                 scaler.scale(loss).backward()
             else:
@@ -267,10 +200,6 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.TRAIN.CLIP_GRAD)
             else:
                 grad_norm = get_grad_norm(model.parameters())
-
-            # Old:
-            # optimizer.step()
-            # New:
             if config.AMP_OPT_LEVEL != "O0":
                 scaler.unscale_(optimizer)
                 scaler.step(optimizer)
@@ -380,9 +309,6 @@ if __name__ == '__main__':
     _, config = parse_option()
 
     if config.AMP_OPT_LEVEL != "O0":
-        #Old:
-        #assert amp is not None, "amp not installed!"
-        #New:
         print("Using AMP")
 
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:

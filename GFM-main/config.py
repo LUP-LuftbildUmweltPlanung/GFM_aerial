@@ -20,6 +20,7 @@ _C.DATA = CN()
 _C.DATA.BATCH_SIZE = 128
 # Path to dataset, could be overwritten by command line argument
 _C.DATA.DATA_TRAIN_PATH = ''
+_C.DATA.DATA_VALI_PATH = ''
 _C.DATA.DATA_VALI_PATH_TEMP_IND = ''
 _C.DATA.DATA_VALI_PATH_SPA_IND = ''
 _C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
@@ -27,7 +28,7 @@ _C.DATA.OUTPUT_LMDB = None
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
 # Number of classes
-_C.DATA.CLASSES = ["Agrar", "Berg", "Heide", "Uebergang", "Urban", "Wald", "Wasser"]
+_C.DATA.CLASSES = []
 # Input image size
 _C.DATA.IMG_SIZE = 384 #192 #224
 _C.DATA.TEACHER_IMG_SIZE = 192 #New
@@ -262,9 +263,12 @@ def update_config(config, args):
     if _check_args('alpha'):
         config.ALPHA = args.alpha
 
-    config.DATA.DATA_VALI_PATH = [config.DATA.DATA_VALI_PATH_TEMP_IND,
-                                  config.DATA.DATA_VALI_PATH_SPA_IND,
-                                  config.DATA.DATA_VALI_PATH_TEMP_SPA_IND ]
+    if config.DATA.DATA_VALI_PATH == "":
+        config.DATA.DATA_VALI_PATH = [config.DATA.DATA_VALI_PATH_TEMP_IND,
+                                      config.DATA.DATA_VALI_PATH_SPA_IND,
+                                      config.DATA.DATA_VALI_PATH_TEMP_SPA_IND ]
+    else:
+        config.DATA.DATA_VALI_PATH = [config.DATA.DATA_VALI_PATH]
 
     # set local rank for distributed training
     config.LOCAL_RANK = args.local_rank
@@ -272,7 +276,7 @@ def update_config(config, args):
     # output folder
     config.OUTPUT = os.path.join(config.OUTPUT, config.MODEL.NAME, config.TAG)
 
-    # output stats_1 folder
+    # output stats folder
     config.OUTPUT_STATS = os.path.join(str(config.OUTPUT), "stats")
 
     config.freeze()

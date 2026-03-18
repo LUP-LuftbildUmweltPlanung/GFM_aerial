@@ -17,6 +17,7 @@ import data.rgbi_data as rgbi_data
 
 
 def build_loader_finetune(config, logger):
+    """Builds a data loader for train and validation finetuning data."""
     config.defrost()
     dataset_train, config.MODEL.NUM_CLASSES = build_dataset(config=config, logger=logger)
     config.freeze()
@@ -61,6 +62,11 @@ def build_loader_finetune(config, logger):
 
 
 def build_dataset(config, logger, is_train=True, vali_key=0):
+    """Builds the dataset for the train and validation dataloaders.
+    Parameters: is_train (bool): Whether the dataset is a training dataset. If False, it is asumed to be validation data
+                vali_key (int): The key for the validation dataset paths. Validation paths are given as a list in the config file.
+                                If there are multiple validation objectives to be tested by multiple datasets,
+                                vali_key is the index for the currently initialized dataset."""
     if is_train:
         data_path = config.DATA.DATA_TRAIN_PATH
     else:
@@ -105,7 +111,7 @@ def build_dataset(config, logger, is_train=True, vali_key=0):
 
 
 def build_transform(is_train, config):
-    print("test")
+    print("Not implemented yet")
     exit()
     resize_im = config.DATA.IMG_SIZE > 32
     if is_train:

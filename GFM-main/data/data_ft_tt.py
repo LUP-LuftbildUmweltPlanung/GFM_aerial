@@ -4,7 +4,9 @@ import albumentations.pytorch as ap
 from terratorch.datamodules import GenericNonGeoSegmentationDataModule
 
 
-def initialize_datamodule(config, logger_ml):
+def initialize_datamodule(config):
+    """ Initialize the datamodule for semantic segmentation. The datamodule consists of train, validation and test subsets."""
+
     dataset_path = Path(config.DATA.DATA_TRAIN_PATH)
 
     print(dataset_path)
@@ -23,7 +25,7 @@ def initialize_datamodule(config, logger_ml):
 
         # Split files
         train_split=dataset_path / "splits/train_data",
-        val_split=dataset_path / "splits/valid_data",
+        val_split=dataset_path / "splits/vali_data",
         test_split=dataset_path / "splits/test_data",
 
         # File patterns inside the roots above

@@ -1,0 +1,22 @@
+PRETRAINED: GFM-main/output/simmim_pretrain/gfmaerial_192imgsize_gfm_teacher_ckpt_epoch_97_new_best.pth
+MODEL:
+  TYPE: swin
+  NAME: gfm-aerial_finetune_segmentation
+  RESUME: "" # "PATH/FILE.ckpt" to resume from checkpoint. Otherwise ""
+  DROP_PATH_RATE: 0.1
+  NUM_CLASSES: 20
+  SWIN:
+    EMBED_DIM: 128
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 4, 8, 16, 32 ]
+    WINDOW_SIZE: 6 # 6 for RGBI
+    IN_CHANS: 4 # 4 for RGBI
+DATA:
+  BATCH_SIZE: 32
+  IMG_SIZE: 192 # 192 or 384 for GFM-aerial, depending on the model
+  DATASET: RGBI # RGBI
+  CLASSES: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+  DATA_TRAIN_PATH: PATH # directory with split files and data folders
+TRAIN:
+  EPOCHS: 50
+TAG: gfm-aerial-seg

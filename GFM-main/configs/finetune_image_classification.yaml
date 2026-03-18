@@ -1,0 +1,30 @@
+PRETRAINED: PATH/model.pth # sth like: "GFM-main/output/simmim_pretrain/gfmaerial_192imgsize_gfm_teacher_ckpt_epoch_97_new_best.pth"
+MODEL:
+  TYPE: swin
+  NAME: finetune_gfm-aerial_classification
+  RESUME: "" #PATH/file.ckpt"
+  DROP_PATH_RATE: 0.1
+  SWIN:
+    EMBED_DIM: 128
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 4, 8, 16, 32 ]
+    WINDOW_SIZE: 6 # 4 for UCMerced, 6 for RGBI
+    IN_CHANS: 4 # 3 for UCMerced, 4 for RGBI
+DATA:
+  BATCH_SIZE: 32
+  IMG_SIZE: 192 # 128 for UCMerced, 192 for RGBI
+  DATASET: RGBI # UCMerced, RGBI
+  CLASSES: [] # sth like: ["Agriculture", "Mountain", "Heithland", "Urban", "Forest", "Water"]
+  DATA_TRAIN_PATH: PATH
+  DATA_VALI_PATH: PATH
+TRAIN:
+  EPOCHS: 50
+  WARMUP_EPOCHS: 5
+  BASE_LR: 1.0e-4
+  WARMUP_LR: 1.0e-7
+  MIN_LR: 1.0e-5
+  WEIGHT_DECAY: 0.05
+  LAYER_DECAY: 0.9
+PRINT_FREQ: 100
+SAVE_FREQ: 1
+TAG: gfm-aerial_finetune_class

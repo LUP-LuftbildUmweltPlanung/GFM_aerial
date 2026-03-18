@@ -82,6 +82,9 @@ def parse_option():
 def save_test_to_tif(out_path, sample):
     """
     Saves a reconstructed image in tif format
+    Parameters: out_path (string): directory path to save the reconstructed image to
+                sample (dict): dictionary with keys 'image', 'mask', 'prediction' and 'filename' that holds all
+                                information to save the reconstructed mask with the same georeference as the input image
     """
 
     filename = os.path.basename(sample["filename"]).split(".")[0]
@@ -114,7 +117,7 @@ def main(config):
     logger_ml = MLFlowLogger(save_dir=default_root_dir, experiment_name=experiment, prefix="",
                              tracking_uri="http://74.63.3.44:5000", log_model=False, synchronous=False) #, run_id='f254ce84935c454f8c9480b8ebfefeed')  # , log_graph=True)
 
-    datamodule = initialize_datamodule(config, logger_ml)
+    datamodule = initialize_datamodule(config)
 
     datamodule.setup("fit")
 

@@ -74,15 +74,60 @@ python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_testing.py -
 If you want to save the reconstructed images in an lmdb file, add a path to the OUTPUT_LMDB variable of your yaml file.
 
 ## Finetuning
-To perform finetuning, place the GFM/GFM-aerial pretrained model in the following folder structure.
+We have ready-to-use implementations to finetune GFM-aerial for semantic segmentation and image classification. We are still working on a testing script for image classification.
+
+### Model preparation:
+Place the GFM-aerial pretrained model in the following folder structure.
 ```
-output
-   |- simmim_pretrain
-      |- gfm.pth
+GFM-main
+    |- output
+        |- simmim_pretrain
+            |- gfmaerial_192imgsize_gfm_teacher_ckpt_epoch_97_new_best.pth
 ```
+
+### Data preparation:
+The model runs on images in tif format. The dataset consists of squared tiles of uniform size. GFM-aerial model variants were trained with 129x192 or 384x384 pixel images.
+The dataset is split into training, validation and test data pre-training.
+
+#### Image Classification:
+For image classification, specify the directory paths to the respective train and validation split files, the classes and other training parameters in the finetune_image_classification.yaml file.
+The split files hold the absolute paths to each image, one image per row.
+```
+root = DATA_TRAIN_PATH or DATA_VALI_PATH (can also be the same)
+    |- train.txt
+    |- val.txt
+    |- test.txt
+```
+
+#### Semantic Segmentation:
+For semantic segmentation, the names of the image files (without '.tif') are saved row-wise in text files. The datasets and split files should be placed in the following folder structure:
+Specify the path to the root folder, the classes and number of classes, a checkpoint to resume training and the other training parameters in the configuration finetune_segmentation.yaml file.
+```
+root = DATA_TRAIN_PATH
+    |- trai
+        |- img_tiles
+            |- place images here
+    |- vali
+        |- img_tiles
+                |- place images here
+    |- test
+        |- img_tiles
+                |- place images here
+    |splits
+        |- train_data.txt
+        |- vali_data.txt
+        |- test_data.txt
+```
+
+### Execute finetuning:
 An example command for finetuning for Classification using GFM-aerial and an RGBI dataset:
 ```bash
-python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_finetune.py --cfg GFM-main/configs/finetune.yaml --batch-size 32 --pretrained GFM-main/output/simmim_pretrain/gfmaerial_192imgsize_gfm_teacher_ckpt_epoch_97_new_best.pth --tag rgbi_ft
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/main_finetune_classification.py --cfg GFM-main/configs/finetune_image_classification.yaml
+```
+
+An example command for finetuning for semantic segmentation using GFM-aerial and an RGBI dataset:
+```bash
+python -m torch.distributed.launch --nproc_per_node 1 GFM-main/GFM_structure_ft_tt.py --cfg GFM-main/configs/finetune_segmentation.yaml
 ```
 
 ## Authors
