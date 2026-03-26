@@ -7,7 +7,7 @@ import lightning
 import terratorch.models.necks
 from lightning.pytorch import LightningModule
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, RichProgressBar
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, RichProgressBar, BackboneFinetuning
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.loggers import MLFlowLogger
 from mlflow_config_example import *
@@ -62,7 +62,7 @@ def parse_option():
                         help="whether to use gradient checkpointing to save memory")
     parser.add_argument('--amp-opt-level', type=str, default='O1', choices=['O0', 'O1', 'O2'],
                         help='mixed precision opt level, if O0, no amp is used')
-    parser.add_argument('--output', default='output', type=str, metavar='PATH',
+    parser.add_argument('--output', type=str, metavar='PATH',
                         help='root of test results folder, the full path is <output>/<model_name>/<tag> (default: output)')
     parser.add_argument('--tag', help='tag of experiment')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
@@ -115,7 +115,7 @@ def main(config):
     # logger_tt = TensorBoardLogger(save_dir=default_root_dir, name=experiment, log_graph=True)
     # set log_model=True to log the model in the end
     logger_ml = MLFlowLogger(save_dir=default_root_dir, experiment_name=experiment, prefix="",
-                             tracking_uri="http://74.63.3.44:5000", log_model=False, synchronous=False) #, run_id='f254ce84935c454f8c9480b8ebfefeed')  # , log_graph=True)
+                             tracking_uri=mlflow_tracking_uri, log_model=False, synchronous=False)
 
     datamodule = initialize_datamodule(config)
 
@@ -124,17 +124,20 @@ def main(config):
     val_dataset = datamodule.val_dataset
     train_dataset = datamodule.train_dataset
 
+
+    print(f"Train dataset type: {torch.max(train_dataset[0]['image'])}")
+    print(f"Train dataset size: {type(train_dataset[0])}")
     print(f"Available samples in the training dataset: {len(train_dataset)}")
     print(f"Input shape of first sample: {train_dataset[0]['image'].shape}")
     print(f"Available samples in the validation dataset: {len(val_dataset)}")
     print(f"Input shape of first sample: {val_dataset[0]['image'].shape}")
 
-
-    for i in range(0,3):
-        train_dataset.plot(train_dataset[i])
-        #plt.show()
-        fig = plt.gcf()
-        logger_ml.experiment.log_figure(run_id=logger_ml.run_id, figure=fig, artifact_file="train_example" + str(i) + ".png")
+    # Distorted visualization due to normalization
+    # for i in range(0,3):
+    #     train_dataset.plot(train_dataset[i])
+    #     #plt.show()
+    #     fig = plt.gcf()
+    #     logger_ml.experiment.log_figure(run_id=logger_ml.run_id, figure=fig, artifact_file="train_example" + str(i) + ".png")
 
 
     model, model_args = build_ft_model(config, logger)
@@ -150,10 +153,21 @@ def main(config):
     )
 
     checkpoint_callback = ModelCheckpoint(
-        save_top_k=1,
+        save_top_k=3,
         save_last=True,
-        dirpath=os.path.join(default_root_dir,logger_ml.experiment_id,logger_ml.run_id, "checkpoints")
+        dirpath=os.path.join(default_root_dir,logger_ml.experiment_id,logger_ml.run_id, "checkpoints"),
+        save_on_train_epoch_end=False,
+        monitor="val/loss",
     )
+
+    # # Setup the finetuning callback
+    # backbone_finetuning = BackboneFinetuning(
+    #     unfreeze_backbone_at_epoch=5,  # Start unfreezing backbone at epoch 10
+    #     lambda_func=lambda epoch: 1.5,  # Gradually increase backbone learning rate
+    #     backbone_initial_ratio_lr=0.1,  # Backbone starts at 10% of head learning rate
+    #     should_align=True,  # Align rates when backbone rate reaches head rate
+    #     verbose=True  # Print learning rates during training
+    # )
 
     trainer = Trainer(
         accelerator="auto",  # or specify cpu or gpu
@@ -164,6 +178,7 @@ def main(config):
             RichProgressBar(),
             checkpoint_callback,
             LearningRateMonitor(logging_interval="epoch"),
+            # backbone_finetuning,
         ],
         #log_every_n_steps=config.DATA.BATCH_SIZE,
         enable_model_summary=True,
@@ -189,39 +204,47 @@ def main(config):
 
     print(f"Available samples in the test dataset: {len(test_dataset)}")
     # Use the trained task for inference and visualization
-    task.eval()
+    task.eval() # todo: what model is this? The best one?
 
     # Get a batch from the test dataloader
     datamodule.setup("test")
     test_loader = datamodule.test_dataloader()
 
+    counter = 0
+
     with torch.no_grad():
-        batch = next(iter(test_loader))
-        images = batch["image"].to(task.device)
+        it = iter(test_loader)
+        for i in range(0,len(test_loader)):
+            batch = next(it)
+            images = batch["image"].to(task.device)
 
-        outputs = task(images)
-        preds = torch.argmax(outputs.output, dim=1).cpu().numpy()
+            outputs = task(images)
+            preds = torch.argmax(outputs.output, dim=1).cpu().numpy()
 
-    # Visualize predictions
-    for i in range(0, len(preds)): #num_examples):
-        sample = {
-            "image": batch["image"][i].cpu(),
-            "mask": batch["mask"][i],
-            "prediction": preds[i],
-            "filename": batch["filename"][i],
-        }
-        save_test_to_tif(config.OUTPUT, sample)
-        # if i < 5:
-        #     test_dataset.plot(sample)
-        #     #plt.show()
-        #     fig = plt.gcf()
-        #     logger_ml.experiment.log_figure(run_id=logger_ml.run_id, figure=fig, artifact_file="test"+str(i)+".png")
+            # Visualize predictions
+            for j in range(0, len(preds)): #num_examples):
+                sample = {
+                    "image": batch["image"][j].cpu(),
+                    "mask": batch["mask"][j],
+                    "prediction": preds[j],
+                    "filename": batch["filename"][j],
+                }
+                if counter <= config.TEST.NUM_VIS:
+                    save_test_to_tif(config.OUTPUT, sample)
+                    counter +=1
+                else:
+                    break
+
+            if counter > config.TEST.NUM_VIS:
+                break
 
 
 if __name__ == '__main__':
     _, config = parse_option()
 
     os.makedirs(config.OUTPUT, exist_ok=True)
+
+    print(config.OUTPUT)
 
     logger = create_logger(output_dir=config.OUTPUT, name=f"{config.MODEL.NAME}")
 

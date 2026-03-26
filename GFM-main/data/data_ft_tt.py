@@ -9,7 +9,23 @@ def initialize_datamodule(config):
 
     dataset_path = Path(config.DATA.DATA_TRAIN_PATH)
 
-    print(dataset_path)
+    #print(dataset_path)
+
+    if config.MODEL.SWIN.IN_CHANS == 4:
+        set_means = [0.485, 0.456, 0.406, 0.5947974324226379]
+        set_stds = [0.229, 0.224, 0.225, 0.19213160872459412]
+        data_bands = [0, 1, 2, 3]
+    elif config.MODEL.SWIN.IN_CHANS == 5:
+        set_means = [0.485, 0.456, 0.406, 0.5947974324226379, 0.5]
+        set_stds = [0.229, 0.224, 0.225, 0.19213160872459412, 0.5]
+        data_bands = [0, 1, 2, 3, 4]
+
+    if config.DATA.DATA_FORMAT == "uint16":
+        scale_factor = 65535.0
+    else: # uint8 expected
+        scale_factor = 255.0
+
+    #rescale_image_transform = A.Lambda(name="rescale_image", image=rescale_image(img=image, scale_factor=scale_factor))
 
     datamodule = GenericNonGeoSegmentationDataModule(
         batch_size=config.DATA.BATCH_SIZE,
@@ -32,24 +48,37 @@ def initialize_datamodule(config):
         img_grep="*.tif",
         label_grep="*.tif",
 
+
+
         # Data transforms
         train_transform=[
-            A.RandomCrop(width=config.DATA.TEACHER_IMG_SIZE, height=config.DATA.TEACHER_IMG_SIZE),
+            A.RandomCrop(width=config.DATA.IMG_SIZE, height=config.DATA.IMG_SIZE),
             A.D4(),  # random flips and rotations to stabilize training
+            A.Normalize(mean=set_means, std=set_stds, max_pixel_value=scale_factor, normalization='standard'),
             ap.ToTensorV2(),
-        ],
-        val_transform=[A.RandomCrop(width=config.DATA.TEACHER_IMG_SIZE, height=config.DATA.TEACHER_IMG_SIZE),  ap.ToTensorV2()],
-        test_transform=[A.RandomCrop(width=config.DATA.TEACHER_IMG_SIZE, height=config.DATA.TEACHER_IMG_SIZE),  ap.ToTensorV2()],
+            #A.Lambda(name="rescale_image", image=rescale_image),
 
-        dataset_bands=[0, 1, 2, 3],
-        output_bands=[0, 1, 2, 3],
+        ],
+        val_transform=[A.RandomCrop(width=config.DATA.IMG_SIZE, height=config.DATA.IMG_SIZE),
+                       A.Normalize(mean=set_means, std=set_stds, max_pixel_value=scale_factor,
+                                   normalization='standard'),
+                       ap.ToTensorV2(),
+                       ],
+        test_transform=[A.RandomCrop(width=config.DATA.IMG_SIZE, height=config.DATA.IMG_SIZE),
+                        A.Normalize(mean=set_means, std=set_stds, max_pixel_value=scale_factor,
+                                    normalization='standard'),
+                        ap.ToTensorV2(),
+                        ],
+
+        dataset_bands=data_bands,
+        output_bands=data_bands,
 
         # RGB visualization uses channels [R,G,B] = [3,2,1]
         rgb_indices=[0, 1, 2],
         num_classes=len(config.DATA.CLASSES),
 
-        means=[0.485, 0.456, 0.406, 0.5947974324226379],
-        stds=[0.229, 0.224, 0.225, 0.19213160872459412],
+        means=set_means,
+        stds=set_stds,
 
         no_data_replace=0,
         no_label_replace=-1

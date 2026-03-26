@@ -10,6 +10,7 @@ import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
 from terratorch.models.decoders import upernet_decoder
+from terratorch.models.necks import PermuteDims
 
 
 
@@ -771,6 +772,8 @@ def load_pretrained(config, model, logger):
                 # SpaceNet superres pretrain
                 min_channels = min(temp.shape[1], checkpoint_model['patch_embed.proj.weight'].shape[1])
                 temp[:, :min_channels, :, :] = checkpoint_model['patch_embed.proj.weight'][:, :min_channels, :, :]
+            elif checkpoint_model['patch_embed.proj.weight'].shape[1] == 4 and temp.shape[1] == 5:
+                temp[:, [0, 1, 2, 3], :, :] = checkpoint_model['patch_embed.proj.weight'] # TODO: oder [4,3,2,1] oder [1,2,3,4] oder [3,2,1,0]?
             else:
                 temp[:, [3, 2, 1], :, :] = checkpoint_model['patch_embed.proj.weight']
             checkpoint_model['patch_embed.proj.weight'] = temp
@@ -838,7 +841,7 @@ def build_ft_model(config, logger):
 
     # Model configuration passed to the EncoderDecoderFactory
     model_args = {
-        "backbone": "SwinTransformer",
+        "backbone": "SwinTransformer", #SwinBackboneForSegmentation
         "decoder": "UperNetDecoder",
         "num_classes": len(config.DATA.CLASSES),
         "backbone_pretrained": True,

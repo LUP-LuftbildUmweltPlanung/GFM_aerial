@@ -34,6 +34,8 @@ _C.DATA.IMG_SIZE = 384 #192 #224
 _C.DATA.TEACHER_IMG_SIZE = 192 #New
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
+# Datatype of pixel values (uint8, uint16)
+_C.DATA.DATA_FORMAT = 'uint8'
 # Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.
 _C.DATA.PIN_MEMORY = True
 # Number of data loading threads
@@ -175,6 +177,8 @@ _C.AUG.MIXUP_MODE = 'batch'
 _C.TEST = CN()
 # Whether to use center crop when testing
 _C.TEST.CROP = True
+# How many images of the test set are saved as tif
+_C.TEST.NUM_VIS = 5
 
 # -----------------------------------------------------------------------------
 # Misc
@@ -183,7 +187,7 @@ _C.TEST.CROP = True
 # overwritten by command line argument
 _C.AMP_OPT_LEVEL = ''
 # Path to output folder, overwritten by command line argument
-_C.OUTPUT = ''
+_C.OUTPUT = 'output'
 # Tag of experiment, overwritten by command line argument
 _C.TAG = 'default'
 # Frequency to save checkpoint
