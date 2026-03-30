@@ -79,6 +79,41 @@ def parse_option():
     return args, config
 
 
+def calc_class_weights(train_datamodule, num_classes, key="even"):
+    if key == "full" or type(key) == int:
+        train_loader = train_datamodule.train_dataloader()
+        if key == "full":
+            count = len(train_loader)
+        else:
+            count = min(key, len(train_loader))
+        class_weights = [0] * num_classes
+        total_pixel_count = 0
+        it = iter(train_loader)
+        for i in range(0,count):
+            batch = next(it)
+            mask = batch["mask"]
+            count_classes = mask.unique(return_counts=True)
+            count_classes_list = [count_classes[0].tolist(), count_classes[1].tolist()]
+            total_pixel_count = total_pixel_count + sum(count_classes_list[1])
+            for i in range(len(count_classes_list[0])):
+                class_weights[count_classes_list[0][i]] = class_weights[count_classes_list[0][i]] + count_classes_list[1][i]
+
+        class_weights = [(total_pixel_count / x) if x > 0 else x for x in class_weights]
+    elif key == "batch":
+        train_loader = train_datamodule.train_dataloader()
+        class_weights = [0] * num_classes
+        batch = next(iter(train_loader))
+        mask = batch["mask"]
+        count_classes = mask.unique(return_counts=True)
+        count_classes_list = [count_classes[0].tolist(), count_classes[1].tolist()]
+        total_pixel_count = sum(count_classes_list[1])
+        for i in range(len(count_classes_list[0])):
+             class_weights[count_classes_list[0][i]] = total_pixel_count / count_classes_list[1][i]
+    else: # key == "even" or None
+        class_weights = [1 / num_classes] * num_classes
+    return class_weights
+
+
 def save_test_to_tif(out_path, sample):
     """
     Saves a reconstructed image in tif format
@@ -106,6 +141,17 @@ def save_test_to_tif(out_path, sample):
         dst.write(sample["prediction"], 1)
 
 
+# class SemanticSegmentationTask_custom(SemanticSegmentationTask):
+#     def __init__(self, backbone):
+#         super().__init__()
+#
+#         self.backbone = self.model_args
+
+    def configure_optimizers(self):
+        # Only optimize the head initially - backbone will be added automatically
+        return torch.optim.Adam(self.head.parameters(), lr=1e-3)
+
+
 def main(config):
 
     experiment = "tutorial"
@@ -115,7 +161,7 @@ def main(config):
     # logger_tt = TensorBoardLogger(save_dir=default_root_dir, name=experiment, log_graph=True)
     # set log_model=True to log the model in the end
     logger_ml = MLFlowLogger(save_dir=default_root_dir, experiment_name=experiment, prefix="",
-                             tracking_uri=mlflow_tracking_uri, log_model=False, synchronous=False)
+                             tracking_uri=mlflow_tracking_uri, log_model=False, synchronous=False, run_name=config.TAG)
 
     datamodule = initialize_datamodule(config)
 
@@ -124,6 +170,18 @@ def main(config):
     val_dataset = datamodule.val_dataset
     train_dataset = datamodule.train_dataset
 
+    if config.DATA.CLASS_WEIGHT_CALC is None:
+        if len(config.DATA.CLASS_WEIGHTS) != config.MODEL.NUM_CLASSES:
+            raise ValueError("CLASS_WEIGHTS must have same length as DATA.CLASSES")
+    else:
+        config.defrost()
+        config.DATA.CLASS_WEIGHTS = calc_class_weights(datamodule, config.MODEL.NUM_CLASSES, config.DATA.CLASS_WEIGHT_CALC)
+        config.freeze()
+
+    print(f"Class weights: {config.DATA.CLASS_WEIGHTS}, {type(config.DATA.CLASS_WEIGHTS[0])}")
+    logger_ml.experiment.log_dict(logger_ml.run_id, dict(zip(list(range(0,config.MODEL.NUM_CLASSES)), config.DATA.CLASS_WEIGHTS)),"class_weights.txt")
+    #print(f"Number of batches in the training dataset: {len(datamodule.train_dataloader())}")
+    #exit()
 
     print(f"Train dataset type: {torch.max(train_dataset[0]['image'])}")
     print(f"Train dataset size: {type(train_dataset[0])}")
@@ -145,11 +203,13 @@ def main(config):
     task = SemanticSegmentationTask(
         model_args=model_args,
         model=model,
-        loss="ce",
+        class_weights=config.DATA.CLASS_WEIGHTS,
+        loss='focal', #"ce", # for 'ce': RuntimeError: Error(s) in loading state_dict for SemanticSegmentationTask: Missing key(s) in state_dict: "criterion.weight".
         lr=2e-5,
         ignore_index=-1,
         optimizer="AdamW",
         optimizer_hparams={"weight_decay": 0.05},
+        #freeze_backbone=True
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -161,6 +221,7 @@ def main(config):
     )
 
     # # Setup the finetuning callback
+    # AttributeError: 'SemanticSegmentationTask' object has no attribute 'backbone'
     # backbone_finetuning = BackboneFinetuning(
     #     unfreeze_backbone_at_epoch=5,  # Start unfreezing backbone at epoch 10
     #     lambda_func=lambda epoch: 1.5,  # Gradually increase backbone learning rate

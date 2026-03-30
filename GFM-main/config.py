@@ -27,8 +27,12 @@ _C.DATA.DATA_VALI_PATH_TEMP_SPA_IND = ''
 _C.DATA.OUTPUT_LMDB = None
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
-# Number of classes
+# List of classes
 _C.DATA.CLASSES = []
+# Class weights calculation, either "even", "full" or "batch" or None if list is given
+_C.DATA.CLASS_WEIGHT_CALC = None
+# Precalculated list of lass weights
+_C.DATA.CLASS_WEIGHTS = []
 # Input image size
 _C.DATA.IMG_SIZE = 384 #192 #224
 _C.DATA.TEACHER_IMG_SIZE = 192 #New

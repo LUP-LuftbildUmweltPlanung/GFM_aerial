@@ -75,7 +75,7 @@ def initialize_datamodule(config):
 
         # RGB visualization uses channels [R,G,B] = [3,2,1]
         rgb_indices=[0, 1, 2],
-        num_classes=len(config.DATA.CLASSES),
+        num_classes=config.MODEL.NUM_CLASSES,
 
         means=set_means,
         stds=set_stds,

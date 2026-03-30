@@ -837,13 +837,13 @@ def build_ft_model(config, logger):
     model_factory = EncoderDecoderFactory()
     model = model_factory.build_model(task="segmentation", backbone=backbone, decoder=decoder,
                                       necks=[{"name": "PermuteDims", "new_order": [0, 3, 1, 2]}],
-                                      num_classes=len(config.DATA.CLASSES))
+                                      num_classes=config.MODEL.NUM_CLASSES)
 
     # Model configuration passed to the EncoderDecoderFactory
     model_args = {
-        "backbone": "SwinTransformer", #SwinBackboneForSegmentation
+        "backbone": "SwinBackboneForSegmentation",
         "decoder": "UperNetDecoder",
-        "num_classes": len(config.DATA.CLASSES),
+        "num_classes": config.MODEL.NUM_CLASSES,
         "backbone_pretrained": True,
         "decoder_channels": backbone.num_features,
         "head_dropout": 0.2,
